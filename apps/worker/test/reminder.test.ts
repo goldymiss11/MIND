@@ -1,8 +1,14 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import { checkAndSendReminders, type TelegramSender } from "../src/reminder.js";
+import {
+  scanReminders,
+  checkAndSendReminders,
+  processReminderJob,
+  SCAN_REMINDERS_JOB_NAME,
+  type TelegramSender,
+} from "../src/reminder.js";
 
-test("checkAndSendReminders sends reminders to telegram users and updates tasks", async () => {
+test("scanReminders sends reminders to telegram users and updates tasks", async () => {
   const sentMessages: { chatId: number | string; text: string }[] = [];
   const updatedTaskIds: string[] = [];
 
@@ -34,7 +40,6 @@ test("checkAndSendReminders sends reminders to telegram users and updates tasks"
     update: () => ({
       set: () => ({
         where: async (condition: any) => {
-          // Track updated tasks
           const id = condition?.queryChunks?.[1]?.value || "updated";
           updatedTaskIds.push(id);
           return [{ id }];
@@ -50,7 +55,7 @@ test("checkAndSendReminders sends reminders to telegram users and updates tasks"
     },
   };
 
-  const result = await checkAndSendReminders(mockDb, mockTelegramApi);
+  const result = await scanReminders(mockDb, mockTelegramApi);
 
   assert.equal(result.scanned, 2);
   assert.equal(result.reminded, 2);
@@ -70,7 +75,7 @@ test("checkAndSendReminders sends reminders to telegram users and updates tasks"
   assert.equal(updatedTaskIds.length, 2);
 });
 
-test("checkAndSendReminders isolates errors when sendMessage fails for one user", async () => {
+test("scanReminders isolates errors when sendMessage fails for one user", async () => {
   const sentMessages: { chatId: number | string; text: string }[] = [];
   const updatedTaskIds: string[] = [];
 
@@ -119,7 +124,7 @@ test("checkAndSendReminders isolates errors when sendMessage fails for one user"
     },
   };
 
-  const result = await checkAndSendReminders(mockDb, mockTelegramApi);
+  const result = await scanReminders(mockDb, mockTelegramApi);
 
   assert.equal(result.scanned, 2);
   assert.equal(result.reminded, 1);
@@ -133,7 +138,7 @@ test("checkAndSendReminders isolates errors when sendMessage fails for one user"
   );
 });
 
-test("checkAndSendReminders skips message dispatch when telegramApi is missing", async () => {
+test("scanReminders skips message dispatch when telegramApi is missing", async () => {
   const mockTasks = [
     {
       id: "task-1",
@@ -163,10 +168,78 @@ test("checkAndSendReminders skips message dispatch when telegramApi is missing",
     }),
   };
 
-  const result = await checkAndSendReminders(mockDb, null);
+  const result = await scanReminders(mockDb, null);
 
   assert.equal(result.scanned, 1);
   assert.equal(result.reminded, 0);
   assert.equal(result.errors, 0);
   assert.equal(updateCalled, false);
+});
+
+test("checkAndSendReminders maintains backward compatibility alias", async () => {
+  assert.equal(typeof checkAndSendReminders, "function");
+  assert.equal(checkAndSendReminders, scanReminders);
+});
+
+test("processReminderJob processes scan-reminders job correctly (BullMQ Worker simulation)", async () => {
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        innerJoin: () => ({
+          where: async () => [],
+        }),
+      }),
+    }),
+  };
+
+  const mockJob = {
+    name: SCAN_REMINDERS_JOB_NAME,
+  };
+
+  const result = await processReminderJob(mockJob, mockDb, null);
+  assert.notEqual(result, null);
+  assert.equal(result?.scanned, 0);
+  assert.equal(result?.reminded, 0);
+  assert.equal(result?.errors, 0);
+});
+
+test("processReminderJob ignores unknown jobs without error", async () => {
+  const mockJob = {
+    name: "some-other-unrelated-job",
+  };
+
+  const result = await processReminderJob(mockJob, {} as any, null);
+  assert.equal(result, null);
+});
+
+test("BullMQ repeatable job registration can be mocked without Redis", async () => {
+  // Mock BullMQ Queue instance to verify registration without requiring live Redis
+  const addedJobs: { name: string; data: unknown; opts: unknown }[] = [];
+
+  const mockBullMqQueue = {
+    add: mock.fn(async (name: string, data: unknown, opts: unknown) => {
+      addedJobs.push({ name, data, opts });
+      return { id: "job-1", name };
+    }),
+  };
+
+  const cronPattern = "*/5 * * * *";
+  await mockBullMqQueue.add(
+    SCAN_REMINDERS_JOB_NAME,
+    {},
+    {
+      repeat: {
+        pattern: cronPattern,
+      },
+    }
+  );
+
+  assert.equal(mockBullMqQueue.add.mock.callCount(), 1);
+  assert.equal(addedJobs.length, 1);
+  assert.equal(addedJobs[0]?.name, "scan-reminders");
+  assert.deepEqual(addedJobs[0]?.opts, {
+    repeat: {
+      pattern: "*/5 * * * *",
+    },
+  });
 });

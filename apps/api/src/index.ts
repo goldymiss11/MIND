@@ -1,4 +1,24 @@
-import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import dotenv from "dotenv";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Resolve root .env path reliably regardless of execution working directory
+const rootEnvPath =
+  (process.env["DOTENV_CONFIG_PATH"] && fs.existsSync(process.env["DOTENV_CONFIG_PATH"])
+    ? process.env["DOTENV_CONFIG_PATH"]
+    : undefined) ??
+  [
+    path.resolve(__dirname, "../../../.env"),
+    path.resolve(__dirname, "../../.env"),
+    path.resolve(process.cwd(), ".env"),
+    path.resolve(process.cwd(), "../../.env"),
+  ].find((candidate) => fs.existsSync(candidate)) ??
+  path.resolve(__dirname, "../../../.env");
+
+dotenv.config({ path: rootEnvPath });
 
 import { buildServer } from "./app.js";
 import { OrchestratorService } from "@mind/core";

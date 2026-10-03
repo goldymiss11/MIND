@@ -14,13 +14,15 @@ export interface TelegramSender {
   ): Promise<unknown>;
 }
 
+export const SCAN_REMINDERS_JOB_NAME = "scan-reminders";
+
 /**
  * Scans for tasks with an approaching deadline (< 4 hours from now)
  * that have not yet been reminded (lastRemindedAt IS NULL),
  * sends a proactive reminder to the user via Telegram,
  * and records lastRemindedAt = NOW().
  */
-export async function checkAndSendReminders(
+export async function scanReminders(
   database: MindDb = db,
   telegramApi?: TelegramSender | null
 ): Promise<ReminderJobResult> {
@@ -89,4 +91,23 @@ export async function checkAndSendReminders(
   }
 
   return result;
+}
+
+/**
+ * Backward compatibility alias for scanReminders.
+ */
+export const checkAndSendReminders = scanReminders;
+
+/**
+ * Job processor function called by the BullMQ worker for proactive reminder jobs.
+ */
+export async function processReminderJob(
+  job: { name: string },
+  database: MindDb = db,
+  telegramApi?: TelegramSender | null
+): Promise<ReminderJobResult | null> {
+  if (job.name === SCAN_REMINDERS_JOB_NAME) {
+    return scanReminders(database, telegramApi);
+  }
+  return null;
 }

@@ -5,8 +5,7 @@ import { eq, and, desc, ne } from "drizzle-orm";
 import { db as defaultDb, schema, type MindDb } from "@mind/db";
 import { AiService, AiMessage, Type, type TokenUsage } from "@mind/ai";
 import { MemoryService, type ExtractedMemoryItem } from "@mind/memory";
-// @ts-ignore
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "node:crypto";
 import { ExecutionResult, ExecutionPlan } from "../types/execution.js";
 import { toolRegistry } from "../tools/registry.js";
 
