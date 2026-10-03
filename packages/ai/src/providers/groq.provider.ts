@@ -30,7 +30,13 @@ export class GroqProvider implements AIProvider {
 
   private get client(): Groq {
     if (!this._client) {
-      const key = this.apiKey ?? process.env["GROQ_API_KEY"];
+      const key =
+        this.apiKey ??
+        process.env["GROQ_API_KEY"] ??
+        process.env["GROK_API_KEY"] ??
+        process.env["GROQ_KEY"] ??
+        process.env["GROK_KEY"] ??
+        process.env["GROK"];
       if (!key) {
         throw new ProviderError(
           ProviderErrorCode.AUTH_ERROR,

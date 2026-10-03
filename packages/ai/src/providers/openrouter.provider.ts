@@ -22,7 +22,12 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   private get key(): string {
-    const key = this.apiKey ?? process.env["OPENROUTER_API_KEY"];
+    const key =
+      this.apiKey ??
+      process.env["OPENROUTER_API_KEY"] ??
+      process.env["OPEN_ROUTER_API"] ??
+      process.env["OPEN_ROUTER_API_KEY"] ??
+      process.env["OPENROUTER_API"];
     if (!key) {
       throw new ProviderError(ProviderErrorCode.AUTH_ERROR, "OPENROUTER_API_KEY is not set");
     }
@@ -53,7 +58,7 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   public async generateText(prompt: string, options?: GenerateTextOptions): Promise<AiResponse<string>> {
-    const model = options?.model || "meta-llama/llama-3.3-70b-instruct:free";
+    const model = options?.model || "qwen/qwen3.8-27b:free";
 
     const messages: any[] = [];
     if (options?.systemInstruction) {
@@ -155,7 +160,7 @@ export class OpenRouterProvider implements AIProvider {
     schema: any,
     options?: GenerateStructuredOptions
   ): Promise<AiResponse<T>> {
-    const model = options?.model || "meta-llama/llama-3.3-70b-instruct:free";
+    const model = options?.model || "qwen/qwen3.8-27b:free";
 
     const systemPrompt = options?.systemInstruction
       ? `${options.systemInstruction}\nReturn ONLY a valid JSON object matching this schema:\n${JSON.stringify(schema)}`

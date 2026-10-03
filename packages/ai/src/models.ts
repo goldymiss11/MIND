@@ -81,6 +81,20 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     pricingClass: "free",
     tiers: ["simple"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
+  },
+  "qwen/qwen3.8-27b:free": {
+    provider: "openrouter",
+    model: "qwen/qwen3.8-27b:free",
+    pricingClass: "free",
+    tiers: ["standard", "complex"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
+  },
+  "nvidia/nemotron-3.5-lightning:free": {
+    provider: "openrouter",
+    model: "nvidia/nemotron-3.5-lightning:free",
+    pricingClass: "free",
+    tiers: ["simple", "standard"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   }
 };
 
