@@ -1,0 +1,27 @@
+{
+  "name": "@mind/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "DOTENV_CONFIG_PATH=../../.env tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@mind/core": "*",
+    "@mind/db": "*",
+    "@mind/shared": "*",
+    "@mind/telegram": "*",
+    "dotenv": "^18.0.5",
+    "fastify": "^5.2.1",
+    "grammy": "^1.35.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

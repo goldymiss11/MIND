@@ -1,0 +1,24 @@
+{
+  "name": "mind-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "typecheck": "npm run --workspaces --if-present typecheck",
+    "test": "npm run --workspaces --if-present test",
+    "dev": "npm --workspace=@mind/api run dev",
+    "start": "npm --workspace=@mind/api run start",
+    "dev:worker": "npm --workspace=@mind/worker run dev",
+    "start:worker": "npm --workspace=@mind/worker run start"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
