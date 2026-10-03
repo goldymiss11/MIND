@@ -9,7 +9,58 @@ export interface MessageHandler {
     userId: string,
     text: string,
     chatId?: string
-  ): Promise<{ text: string; artifacts?: { name: string; content: string }[] }>;
+  ): Promise<{ text: string; artifacts?: { name: string; content: string }[]; citations?: any[] }>;
+}
+
+/**
+ * Splits a text into chunks that fit within Telegram's message limit (4096 characters).
+ * Default max chunk size is 4000 to leave headroom.
+ * Splits on paragraph boundaries (\n\n), line breaks (\n), or whitespace when possible.
+ */
+export function splitTelegramMessage(text: string, maxLength = 4000): string[] {
+  if (!text || text.length <= maxLength) {
+    return [text || ""];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLength) {
+    let splitIdx = -1;
+
+    // 1. Try splitting at paragraph boundary
+    const paragraphIdx = remaining.lastIndexOf("\n\n", maxLength);
+    if (paragraphIdx > maxLength * 0.3) {
+      splitIdx = paragraphIdx + 2;
+    } else {
+      // 2. Try splitting at line break
+      const lineIdx = remaining.lastIndexOf("\n", maxLength);
+      if (lineIdx > maxLength * 0.3) {
+        splitIdx = lineIdx + 1;
+      } else {
+        // 3. Try splitting at space/word boundary
+        const spaceIdx = remaining.lastIndexOf(" ", maxLength);
+        if (spaceIdx > maxLength * 0.3) {
+          splitIdx = spaceIdx + 1;
+        } else {
+          // 4. Hard cut if no clean boundary
+          splitIdx = maxLength;
+        }
+      }
+    }
+
+    const chunk = remaining.slice(0, splitIdx).trimEnd();
+    if (chunk.length > 0) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(splitIdx).trimStart();
+  }
+
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+
+  return chunks.length > 0 ? chunks : [""];
 }
 
 /**
@@ -58,7 +109,11 @@ export function setupBot(
         chatId !== undefined ? String(chatId) : undefined
       );
 
-      await ctx.reply(responseText?.trim() || "Готово");
+      const messageContent = responseText?.trim() || "Готово";
+      const chunks = splitTelegramMessage(messageContent, 4000);
+      for (const chunk of chunks) {
+        await ctx.reply(chunk);
+      }
 
       if (artifacts && artifacts.length > 0) {
         for (const art of artifacts) {

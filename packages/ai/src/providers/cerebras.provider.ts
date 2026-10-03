@@ -20,6 +20,7 @@ export class CerebrasProvider implements AIProvider {
     supportsStructuredOutput: true,
     supportsToolCalling: true,
     supportsVision: false,
+    supportsGoogleSearch: false,
   };
 
   private _client: Cerebras | null = null;

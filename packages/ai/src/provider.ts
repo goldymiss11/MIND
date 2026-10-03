@@ -28,6 +28,7 @@ export interface ProviderCapabilities {
   supportsStructuredOutput: boolean;
   supportsToolCalling: boolean;
   supportsVision: boolean;
+  supportsGoogleSearch: boolean;
 }
 
 export interface AIProvider {

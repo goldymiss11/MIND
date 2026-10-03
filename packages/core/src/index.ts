@@ -54,16 +54,16 @@ export interface Memory {
  * Task lifecycle statuses.
  */
 export type TaskStatus =
-  | "TODO"
-  | "IN_PROGRESS"
-  | "BLOCKED"
-  | "DONE"
-  | "CANCELLED";
+  | "inbox"
+  | "in_progress"
+  | "blocked"
+  | "completed"
+  | "cancelled";
 
 /**
  * Task priority levels.
  */
-export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 /**
  * Core Task entity representation defined in GEMINI.md (#8 Tasks).
@@ -85,5 +85,6 @@ export interface Task {
 }
 
 // Application services
+export * from "./types/execution.js";
 export * from "./services/orchestrator.service.js";
 export * from "@mind/memory";

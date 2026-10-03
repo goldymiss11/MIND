@@ -28,12 +28,20 @@ export interface AiMessage {
   originalParts?: any[];
 }
 
+export interface Citation {
+  title?: string;
+  url: string;
+  startIndex?: number;
+  endIndex?: number;
+}
+
 export interface AiResponse<T> {
   result: T;
   functionCalls?: AiToolCall[];
   originalParts?: any[];
   usage: TokenUsage;
   model: string;
+  citations?: Citation[];
 }
 
 export interface GenerateTextOptions {
@@ -42,6 +50,7 @@ export interface GenerateTextOptions {
   model?: string;
   history?: AiMessage[];
   tools?: any[]; // We can unify this later, but keep as any[] for now
+  googleSearch?: boolean;
 }
 
 export interface GenerateStructuredOptions {

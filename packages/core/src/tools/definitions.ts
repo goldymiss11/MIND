@@ -14,6 +14,7 @@ export function resolveSkillPath(skillName: string): string | null {
   try {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
     candidates.push(
+      path.resolve(currentDir, "../../../agents/skills", safeSkillName, "SKILL.md"),
       path.resolve(currentDir, "../../../../agents/skills", safeSkillName, "SKILL.md")
     );
   } catch {
@@ -22,7 +23,10 @@ export function resolveSkillPath(skillName: string): string | null {
 
   candidates.push(
     path.resolve(process.cwd(), "packages/agents/skills", safeSkillName, "SKILL.md"),
-    path.resolve(process.cwd(), ".agents/skills", safeSkillName, "SKILL.md")
+    path.resolve(process.cwd(), "../agents/skills", safeSkillName, "SKILL.md"),
+    path.resolve(process.cwd(), "../../packages/agents/skills", safeSkillName, "SKILL.md"),
+    path.resolve(process.cwd(), ".agents/skills", safeSkillName, "SKILL.md"),
+    path.resolve(process.cwd(), "../.agents/skills", safeSkillName, "SKILL.md")
   );
 
   for (const candidate of candidates) {
@@ -116,14 +120,21 @@ export const invokeSkillTool: ToolDefinition = {
       tier: "complex",
       systemInstruction: skillMdContent,
     });
+
+    const skillContent = skillResponse?.result?.trim();
+    if (!skillContent) {
+      return {
+        success: false,
+        error: "Навык вернул пустой результат. Документ не был создан."
+      };
+    }
     
-    // We should probably log this Ai run, but context will handle it if needed.
     if (context.logAiRun) {
        await context.logAiRun(`skill_${path.basename(skillName)}`, skillResponse);
     }
 
-    const artifactName = `${skillName}_${Date.now()}.md`;
-    generatedArtifacts.push({ name: artifactName, content: skillResponse.result });
+    const artifactName = `${path.basename(skillName)}_${Date.now()}.md`;
+    generatedArtifacts.push({ name: artifactName, content: skillContent });
 
     return {
       success: true,

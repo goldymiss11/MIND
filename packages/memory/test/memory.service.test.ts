@@ -178,3 +178,80 @@ test("MemoryService: assembleContextPack formats text correctly", async () => {
   assert.ok(pack.formattedText.includes("- Lives in Amsterdam"));
   assert.ok(pack.formattedText.includes("- Likes TypeScript"));
 });
+
+test("MemoryService: retrieveRelevantMemories gracefully degrades when embedding fails (recency fallback)", async () => {
+  const fallbackMemories = [
+    { id: "m-recent-1", content: "Recent fact 1", updatedAt: new Date() },
+    { id: "m-recent-2", content: "Recent fact 2", updatedAt: new Date() },
+  ];
+
+  let fallbackCalled = false;
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async () => {
+              fallbackCalled = true;
+              return fallbackMemories;
+            },
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const mockAiFailing: any = {
+    generateEmbedding: async () => {
+      throw new Error("Gemini embeddings API unavailable (503)");
+    },
+  };
+
+  const svc = new MemoryService({ db: mockDb, ai: mockAiFailing });
+  const results = await svc.retrieveRelevantMemories("user-1", "anything");
+
+  assert.ok(fallbackCalled);
+  assert.equal(results.length, 2);
+  assert.equal(results[0]?.content, "Recent fact 1");
+});
+
+test("MemoryService: saveMemories gracefully degrades when embedding fails (saves with null embedding)", async () => {
+  let insertedVal: any = null;
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [], // No exact match
+        }),
+      }),
+    }),
+    insert: () => ({
+      values: (val: any) => ({
+        returning: async () => {
+          insertedVal = val;
+          return [{ id: "mem-no-emb" }];
+        },
+      }),
+    }),
+  };
+
+  const mockAiFailing: any = {
+    generateEmbedding: async () => {
+      throw new Error("Embedding quota exhausted");
+    },
+  };
+
+  const svc = new MemoryService({ db: mockDb, ai: mockAiFailing });
+  const ids = await svc.saveMemories("user-1", [
+    { type: "semantic", content: "Fact saved without embedding", importance: 1 },
+  ], { sourceMessageId: "msg-123" });
+
+  assert.equal(ids.length, 1);
+  assert.equal(ids[0], "mem-no-emb");
+  assert.equal(insertedVal?.content, "Fact saved without embedding");
+  assert.equal(insertedVal?.embedding, null);
+  assert.equal(insertedVal?.sourceMessageId, "msg-123");
+});
+

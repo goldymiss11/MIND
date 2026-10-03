@@ -26,6 +26,11 @@ export type LogAiRunFn = (
   aiResponse: { model: string; usage?: TokenUsage }
 ) => Promise<void>;
 
+export interface SaveMemoriesOptions {
+  logAiRun?: LogAiRunFn;
+  sourceMessageId?: string | null;
+}
+
 export interface MemoryServiceOptions {
   db?: MindDb;
   ai?: AiService;

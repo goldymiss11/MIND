@@ -1,10 +1,11 @@
-import { eq, asc, cosineDistance } from "drizzle-orm";
+import { eq, and, or, asc, desc, isNull, gt, cosineDistance } from "drizzle-orm";
 import { db as defaultDb, schema, type MindDb } from "@mind/db";
 import { AiService, Type } from "@mind/ai";
 import type {
   ExtractedMemoryItem,
   MemoryContextPack,
   LogAiRunFn,
+  SaveMemoriesOptions,
   MemoryServiceOptions,
 } from "./types.js";
 
@@ -93,7 +94,7 @@ export class MemoryService {
   async saveMemories(
     userId: string,
     memories: ExtractedMemoryItem[],
-    options?: { logAiRun?: LogAiRunFn }
+    options?: SaveMemoriesOptions
   ): Promise<string[]> {
     const savedMemoryIds: string[] = [];
     if (!Array.isArray(memories)) return savedMemoryIds;
@@ -101,40 +102,82 @@ export class MemoryService {
     for (const mem of memories) {
       if (!mem.content) continue;
 
-      const embRes = await this.ai.generateEmbedding(mem.content, { tier: "embedding" });
-      if (options?.logAiRun) {
-        await options.logAiRun(userId, "memory_embedding", embRes);
+      let embRes: { result: number[]; model: string; usage?: any } | null = null;
+      try {
+        embRes = await this.ai.generateEmbedding(mem.content, { tier: "embedding" });
+        if (options?.logAiRun) {
+          await options.logAiRun(userId, "memory_embedding", embRes);
+        }
+      } catch (embErr) {
+        console.warn(`[MemoryService] Embedding generation failed for memory. Falling back to text-only storage:`, embErr);
       }
 
-      // Deduplication check via cosine distance
-      const distanceSql = cosineDistance(schema.memories.embedding, embRes.result);
-      const similarMemories = await this.db
-        .select({ id: schema.memories.id, distance: distanceSql })
-        .from(schema.memories)
-        .where(eq(schema.memories.userId, userId))
-        .orderBy(asc(distanceSql))
-        .limit(1);
+      if (embRes && Array.isArray(embRes.result)) {
+        // Deduplication check via cosine distance
+        const distanceSql = cosineDistance(schema.memories.embedding, embRes.result);
+        const similarMemories = await this.db
+          .select({ id: schema.memories.id, distance: distanceSql })
+          .from(schema.memories)
+          .where(eq(schema.memories.userId, userId))
+          .orderBy(asc(distanceSql))
+          .limit(1);
 
-      if (similarMemories.length > 0 && (similarMemories[0]?.distance as number) < this.deduplicationThreshold) {
-        await this.db
-          .update(schema.memories)
-          .set({ content: mem.content, updatedAt: new Date() })
-          .where(eq(schema.memories.id, similarMemories[0]!.id));
-        savedMemoryIds.push(similarMemories[0]!.id as string);
+        if (similarMemories.length > 0 && (similarMemories[0]?.distance as number) < this.deduplicationThreshold) {
+          const updateData: Record<string, any> = { content: mem.content, updatedAt: new Date() };
+          if (options?.sourceMessageId) updateData.sourceMessageId = options.sourceMessageId;
+          await this.db
+            .update(schema.memories)
+            .set(updateData)
+            .where(eq(schema.memories.id, similarMemories[0]!.id));
+          savedMemoryIds.push(similarMemories[0]!.id as string);
+        } else {
+          const inserted = await this.db
+            .insert(schema.memories)
+            .values({
+              userId,
+              type: mem.type || "semantic",
+              content: mem.content,
+              importance: mem.importance ?? 1,
+              confidence: mem.confidence ?? 1.0,
+              source: "conversation",
+              sourceMessageId: options?.sourceMessageId ?? null,
+              embedding: embRes.result,
+            })
+            .returning();
+          savedMemoryIds.push(inserted[0]!.id as string);
+        }
       } else {
-        const inserted = await this.db
-          .insert(schema.memories)
-          .values({
-            userId,
-            type: mem.type || "semantic",
-            content: mem.content,
-            importance: mem.importance ?? 1,
-            confidence: mem.confidence ?? 1.0,
-            source: "conversation",
-            embedding: embRes.result,
-          })
-          .returning();
-        savedMemoryIds.push(inserted[0]!.id as string);
+        // Fallback without embeddings: exact match deduplication
+        const exactMemories = await this.db
+          .select({ id: schema.memories.id })
+          .from(schema.memories)
+          .where(and(eq(schema.memories.userId, userId), eq(schema.memories.content, mem.content)))
+          .limit(1);
+
+        if (exactMemories.length > 0) {
+          const updateData: Record<string, any> = { updatedAt: new Date() };
+          if (options?.sourceMessageId) updateData.sourceMessageId = options.sourceMessageId;
+          await this.db
+            .update(schema.memories)
+            .set(updateData)
+            .where(eq(schema.memories.id, exactMemories[0]!.id));
+          savedMemoryIds.push(exactMemories[0]!.id as string);
+        } else {
+          const inserted = await this.db
+            .insert(schema.memories)
+            .values({
+              userId,
+              type: mem.type || "semantic",
+              content: mem.content,
+              importance: mem.importance ?? 1,
+              confidence: mem.confidence ?? 1.0,
+              source: "conversation",
+              sourceMessageId: options?.sourceMessageId ?? null,
+              embedding: null,
+            })
+            .returning();
+          savedMemoryIds.push(inserted[0]!.id as string);
+        }
       }
     }
 
@@ -147,14 +190,15 @@ export class MemoryService {
   async processAndSave(
     userId: string,
     text: string,
-    options?: { logAiRun?: LogAiRunFn }
+    options?: SaveMemoriesOptions
   ): Promise<string[]> {
     const extracted = await this.extractMemories(text, { userId, logAiRun: options?.logAiRun });
     return this.saveMemories(userId, extracted, options);
   }
 
   /**
-   * Retrieve the top-N nearest memories based on vector semantic similarity.
+   * Retrieve the top-N nearest memories based on vector semantic similarity,
+   * excluding expired memories. If embedding fails, gracefully falls back to recent memories.
    */
   async retrieveRelevantMemories(
     userId: string,
@@ -162,18 +206,33 @@ export class MemoryService {
     limit: number = 5,
     options?: { logAiRun?: LogAiRunFn }
   ) {
-    const queryEmb = await this.ai.generateEmbedding(query, { tier: "embedding" });
-    if (options?.logAiRun) {
-      await options.logAiRun(userId, "query_embedding", queryEmb);
-    }
+    const notExpiredCondition = or(
+      isNull(schema.memories.expiresAt),
+      gt(schema.memories.expiresAt, new Date())
+    );
 
-    const distanceSql = cosineDistance(schema.memories.embedding, queryEmb.result);
-    return this.db
-      .select()
-      .from(schema.memories)
-      .where(eq(schema.memories.userId, userId))
-      .orderBy(asc(distanceSql))
-      .limit(limit);
+    try {
+      const queryEmb = await this.ai.generateEmbedding(query, { tier: "embedding" });
+      if (options?.logAiRun) {
+        await options.logAiRun(userId, "query_embedding", queryEmb);
+      }
+
+      const distanceSql = cosineDistance(schema.memories.embedding, queryEmb.result);
+      return await this.db
+        .select()
+        .from(schema.memories)
+        .where(and(eq(schema.memories.userId, userId), notExpiredCondition))
+        .orderBy(asc(distanceSql))
+        .limit(limit);
+    } catch (err) {
+      console.warn(`[MemoryService] Vector memory retrieval failed. Falling back to recency-based retrieval:`, err);
+      return await this.db
+        .select()
+        .from(schema.memories)
+        .where(and(eq(schema.memories.userId, userId), notExpiredCondition))
+        .orderBy(desc(schema.memories.updatedAt))
+        .limit(limit);
+    }
   }
 
   /**

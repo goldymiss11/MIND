@@ -12,6 +12,7 @@ export interface ModelConfig {
     supportsToolCalling: boolean;
     supportsVision: boolean;
     supportsEmbeddings: boolean;
+    supportsGoogleSearch: boolean;
   };
 }
 
@@ -21,35 +22,35 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     model: "gemini-3.5-flash-lite",
     pricingClass: "free",
     tiers: ["simple"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: true, supportsEmbeddings: false }
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: true, supportsEmbeddings: false, supportsGoogleSearch: true }
   },
   "gemini-3.5-flash": {
     provider: "gemini",
     model: "gemini-3.5-flash",
     pricingClass: "free",
     tiers: ["standard", "complex"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: true, supportsEmbeddings: false }
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: true, supportsEmbeddings: false, supportsGoogleSearch: true }
   },
   "gemini-embedding-2": {
     provider: "gemini",
     model: "gemini-embedding-2",
     pricingClass: "free",
     tiers: ["embedding"],
-    capabilities: { supportsStructuredOutput: false, supportsToolCalling: false, supportsVision: false, supportsEmbeddings: true }
+    capabilities: { supportsStructuredOutput: false, supportsToolCalling: false, supportsVision: false, supportsEmbeddings: true, supportsGoogleSearch: false }
   },
   "llama-3.1-8b-instant": {
     provider: "groq",
     model: "llama-3.1-8b-instant",
     pricingClass: "free",
     tiers: ["simple"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false }
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   },
   "llama-3.3-70b-versatile": {
     provider: "groq",
     model: "llama-3.3-70b-versatile",
     pricingClass: "free",
     tiers: ["standard", "complex"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false }
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   },
   "llama3.1-8b": {
     provider: "cerebras",
@@ -57,7 +58,7 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     pricingClass: "free",
     contextWindow: 8192,
     tiers: ["simple"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false }
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   },
   "llama3.3-70b": {
     provider: "cerebras",
@@ -65,7 +66,7 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     pricingClass: "free",
     contextWindow: 8192,
     tiers: ["standard", "complex"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false }
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   }
 };
 

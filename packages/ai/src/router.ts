@@ -10,6 +10,7 @@ export interface AiRoutingRequest {
     structuredOutput?: boolean;
     vision?: boolean;
     embeddings?: boolean;
+    googleSearch?: boolean;
   };
   allowPaid?: boolean;
 }
@@ -126,6 +127,9 @@ export class AiRouter {
       }
       if (request.requiredCapabilities.structuredOutput && !modelInfo.capabilities.supportsStructuredOutput) {
         throw new Error(`Capability mismatch: requires structuredOutput`);
+      }
+      if (request.requiredCapabilities.googleSearch && !modelInfo.capabilities.supportsGoogleSearch) {
+        throw new Error(`Capability mismatch: requires googleSearch`);
       }
     }
   }

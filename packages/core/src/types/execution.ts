@@ -1,3 +1,7 @@
+import type { Citation } from "@mind/ai";
+
+export type { Citation };
+
 export type ExecutionStatus = "success" | "partial" | "failed";
 
 export type ExecutionErrorCategory =
@@ -21,6 +25,13 @@ export interface ExecutionArtifact {
   content: string;
 }
 
+export interface ExecutionRequest {
+  telegramUserId: string | number;
+  text: string;
+  telegramChatId?: string | number;
+  confirmedToolCalls?: string[];
+}
+
 export interface ExecutionResult {
   status: ExecutionStatus;
   response: string;
@@ -30,6 +41,7 @@ export interface ExecutionResult {
   warnings: ExecutionWarning[];
   executionId: string;
   errorCategory?: ExecutionErrorCategory;
+  citations?: Citation[];
 }
 
 export interface ExecutionPlanStep {

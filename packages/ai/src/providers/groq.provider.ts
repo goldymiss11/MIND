@@ -15,6 +15,7 @@ export class GroqProvider implements AIProvider {
     supportsStructuredOutput: true,
     supportsToolCalling: true,
     supportsVision: false,
+    supportsGoogleSearch: false,
   };
 
   private _client: Groq | null = null;

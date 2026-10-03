@@ -58,18 +58,12 @@ export class AiService {
     if (
       status === 429 || status === "429" || status === "RESOURCE_EXHAUSTED" || message.includes("429") || message.includes("RESOURCE_EXHAUSTED")
     ) {
+      if (message.toLowerCase().includes("quota")) {
+        return ProviderErrorCode.QUOTA_EXCEEDED;
+      }
       return ProviderErrorCode.RATE_LIMITED;
     }
     return ProviderErrorCode.UNKNOWN;
-  }
-
-  private isRetryable(code: ProviderErrorCode): boolean {
-    return (
-      code === ProviderErrorCode.PROVIDER_UNAVAILABLE ||
-      code === ProviderErrorCode.RATE_LIMITED ||
-      code === ProviderErrorCode.TIMEOUT ||
-      code === ProviderErrorCode.QUOTA_EXCEEDED
-    );
   }
 
   private async executeWithRouting<T>(
@@ -92,7 +86,8 @@ export class AiService {
            requiredCapabilities: {
              tools: hasTools,
              structuredOutput: operation === "structured",
-             embeddings: operation === "embedding"
+             embeddings: operation === "embedding",
+             googleSearch: Boolean(options?.googleSearch)
            }
         });
       } catch (err) {
@@ -107,24 +102,56 @@ export class AiService {
 
       try {
         const result = await executeFn(provider, decision.model);
-        // Log routing success optionally
         return result;
       } catch (error: any) {
          const code = this.extractErrorCode(error);
-         
          this.router.reportError(decision.providerId, code);
 
-         if (this.isRetryable(code) && attempt < maxRetries) {
-           console.warn(`API error (${code}) on provider ${decision.providerId}. Retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
-           await new Promise((resolve) => setTimeout(resolve, delay));
-           delay = Math.round(delay * 2);
-           continue;
+         const isExplicitModel = Boolean(typeof options === "string" ? options : options?.model);
+         const canRetrySameProvider = (
+           code === ProviderErrorCode.PROVIDER_UNAVAILABLE ||
+           code === ProviderErrorCode.RATE_LIMITED ||
+           code === ProviderErrorCode.TIMEOUT
+         );
+
+         if (attempt < maxRetries) {
+           if (code === ProviderErrorCode.QUOTA_EXCEEDED) {
+             // Permanent exhaustion on this provider.
+             // Only retry if an alternative provider is available without explicit model pinning.
+             if (!isExplicitModel && operation !== "embedding") {
+               try {
+                 const hasTools = options?.tools && options.tools.length > 0;
+                 this.router.route({
+                   operation,
+                   tier: options?.tier ?? "standard",
+                   requiredCapabilities: {
+                     tools: hasTools,
+                     structuredOutput: operation === "structured",
+                     embeddings: false,
+                     googleSearch: Boolean(options?.googleSearch)
+                   }
+                 });
+                 console.warn(`Quota exceeded on provider ${decision.providerId}. Switching to alternative provider...`);
+                 continue; // Switch to alternative provider immediately without backoff delay
+               } catch {
+                 // No alternative available
+               }
+             }
+
+             console.error(`Fatal API error (QUOTA_EXCEEDED) on provider ${decision.providerId}: no alternatives available.`);
+             throw error;
+           }
+
+           if (canRetrySameProvider) {
+             console.warn(`API error (${code}) on provider ${decision.providerId}. Retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
+             await new Promise((resolve) => setTimeout(resolve, delay));
+             delay = Math.round(delay * 2);
+             continue;
+           }
          }
-         
-         // Error is fatal or retries exhausted
-         if (!this.isRetryable(code)) {
-            console.error(`Fatal API error (${code}) on provider ${decision.providerId}`);
-         }
+
+         // Fatal or retries exhausted
+         console.error(`Fatal API error (${code}) on provider ${decision.providerId}`);
          throw error;
       }
     }

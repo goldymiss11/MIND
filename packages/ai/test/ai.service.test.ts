@@ -176,3 +176,159 @@ test("AiService: generateEmbedding retries on Rate Limit (degraded) and succeeds
   assert.deepEqual(response.result, [0.5]);
   assert.equal(callCount, 2);
 });
+
+test("AiService: QUOTA_EXCEEDED on explicit model fails immediately without retrying", async () => {
+  let callCount = 0;
+  const mockClient: any = {
+    models: {
+      generateContent: async () => {
+        callCount++;
+        const err: any = new Error("Resource has been exhausted (e.g. check quota)");
+        err.status = 429;
+        throw err;
+      },
+    },
+  };
+  const service = new AiService({ client: mockClient });
+  await assert.rejects(async () => {
+    await service.generateText("Hello", { model: "gemini-3.5-flash" });
+  }, /quota/i);
+  // Must fail on the first attempt without sleeping or retrying 3 times
+  assert.equal(callCount, 1);
+});
+
+test("AiService: QUOTA_EXCEEDED falls back to alternative provider without delay", async () => {
+  let geminiCalls = 0;
+  let groqCalls = 0;
+  const mockGeminiClient: any = {
+    models: {
+      generateContent: async () => {
+        geminiCalls++;
+        const err: any = new Error("Quota exceeded for quota metric");
+        err.status = 429;
+        throw err;
+      },
+    },
+  };
+  const mockGroqClient: any = {
+    chat: {
+      completions: {
+        create: async () => {
+          groqCalls++;
+          return { choices: [{ message: { content: "Switched from quota-exceeded Gemini to Groq!" } }] };
+        }
+      }
+    }
+  };
+  const service = new AiService({ client: mockGeminiClient, groqClient: mockGroqClient, groqApiKey: "fake" });
+  const start = Date.now();
+  const res = await service.generateText("Hello", { tier: "standard" });
+  const duration = Date.now() - start;
+
+  assert.equal(res.result, "Switched from quota-exceeded Gemini to Groq!");
+  assert.equal(geminiCalls, 1);
+  assert.equal(groqCalls, 1);
+  // Switched immediately without backoff delay (< 1000ms)
+  assert.ok(duration < 1000, `Expected fast switch, took ${duration}ms`);
+});
+
+test("AiService: routes to Gemini when googleSearch: true is requested", async () => {
+  let capturedModel = "";
+  const mockGeminiClient: any = {
+    models: {
+      generateContent: async (params: any) => {
+        capturedModel = params.model;
+        return {
+          text: "Search result from Gemini",
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
+        };
+      }
+    }
+  };
+  const mockGroqClient: any = {
+    chat: {
+      completions: {
+        create: async () => {
+          throw new Error("Should not be called for googleSearch");
+        }
+      }
+    }
+  };
+  const service = new AiService({
+    client: mockGeminiClient,
+    groqClient: mockGroqClient,
+    groqApiKey: "fake",
+  });
+
+  const res = await service.generateText("What is the latest news?", { googleSearch: true });
+  assert.equal(res.result, "Search result from Gemini");
+  assert.ok(capturedModel.startsWith("gemini-"), `Expected Gemini model, got ${capturedModel}`);
+});
+
+test("GeminiProvider: injects googleSearch tool and extracts grounding metadata into Citation[]", async () => {
+  let capturedParams: any = null;
+  const mockGeminiClient: any = {
+    models: {
+      generateContent: async (params: any) => {
+        capturedParams = params;
+        return {
+          text: "Quantum computing breakthrough was announced today.",
+          candidates: [
+            {
+              groundingMetadata: {
+                webSearchQueries: ["quantum computing breakthrough 2026"],
+                groundingChunks: [
+                  { web: { uri: "https://nature.com/articles/quantum-1", title: "Nature Quantum Article" } },
+                  { web: { uri: "https://news.ycombinator.com/item?id=123", title: "Hacker News Discussion" } }
+                ],
+                groundingSupports: [
+                  {
+                    groundingChunkIndices: [0],
+                    segment: { startIndex: 0, endIndex: 30, text: "Quantum computing breakthrough" }
+                  }
+                ]
+              }
+            }
+          ],
+          usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 25, totalTokenCount: 40 }
+        };
+      }
+    }
+  };
+
+  const service = new AiService({ client: mockGeminiClient });
+  const res = await service.generateText("Latest quantum news", {
+    googleSearch: true,
+    model: "gemini-3.5-flash"
+  });
+
+  assert.equal(res.result, "Quantum computing breakthrough was announced today.");
+  // Verify tools injected in Gemini config
+  assert.ok(capturedParams.config?.tools?.some((t: any) => t.googleSearch !== undefined));
+  // Verify citations extracted
+  assert.ok(Array.isArray(res.citations));
+  assert.equal(res.citations.length, 2);
+  assert.equal(res.citations[0]?.url, "https://nature.com/articles/quantum-1");
+  assert.equal(res.citations[0]?.title, "Nature Quantum Article");
+  assert.equal(res.citations[0]?.startIndex, 0);
+  assert.equal(res.citations[0]?.endIndex, 30);
+  assert.equal(res.citations[1]?.url, "https://news.ycombinator.com/item?id=123");
+  assert.equal(res.citations[1]?.title, "Hacker News Discussion");
+});
+
+test("AiRouter: throws Capability mismatch when googleSearch requested on model without support", async () => {
+  const { AiRouter } = await import("../src/router.js");
+  const router = new AiRouter();
+
+  // groq/cerebras does not support googleSearch
+  assert.throws(() => {
+    router.route({
+      operation: "text",
+      tier: "standard",
+      explicitModel: "llama-3.3-70b-versatile",
+      requiredCapabilities: { googleSearch: true }
+    });
+  }, /requires googleSearch/i);
+});
+
+

@@ -5,7 +5,8 @@ import type {
   GenerateTextOptions, 
   GenerateStructuredOptions, 
   GenerateEmbeddingOptions, 
-  TokenUsage 
+  TokenUsage,
+  Citation
 } from "../types.js";
 import { AIProvider, ProviderCapabilities, ProviderError, ProviderErrorCode } from "../provider.js";
 
@@ -15,6 +16,7 @@ export class GeminiProvider implements AIProvider {
     supportsStructuredOutput: true,
     supportsToolCalling: true,
     supportsVision: true,
+    supportsGoogleSearch: true,
   };
 
   private _client: GoogleGenAI | null = null;
@@ -73,8 +75,15 @@ export class GeminiProvider implements AIProvider {
     if (options?.systemInstruction) {
       config["systemInstruction"] = options.systemInstruction;
     }
+    const tools: any[] = [];
     if (options?.tools && options.tools.length > 0) {
-      config["tools"] = options.tools;
+      tools.push(...options.tools);
+    }
+    if (options?.googleSearch) {
+      tools.push({ googleSearch: {} });
+    }
+    if (tools.length > 0) {
+      config["tools"] = tools;
     }
 
     try {
@@ -88,9 +97,12 @@ export class GeminiProvider implements AIProvider {
         ? response.functionCalls.map((fc: any) => ({ name: fc.name || "", args: fc.args || {} }))
         : undefined;
 
+      const citations = this.extractCitations(response);
+
       return {
         result: response.text ?? "",
         ...(functionCalls ? { functionCalls } : {}),
+        ...(citations && citations.length > 0 ? { citations } : {}),
         originalParts: (response as any).candidates?.[0]?.content?.parts,
         usage: this.extractTokenUsage(response.usageMetadata),
         model,
@@ -235,5 +247,51 @@ export class GeminiProvider implements AIProvider {
         `Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}`
       );
     }
+  }
+
+  private extractCitations(response: any): Citation[] | undefined {
+    const candidate = response?.candidates?.[0];
+    const metadata = candidate?.groundingMetadata;
+    if (!metadata) return undefined;
+
+    const chunks = metadata.groundingChunks;
+    if (!Array.isArray(chunks) || chunks.length === 0) return undefined;
+
+    const citations: Citation[] = [];
+    const supports = metadata.groundingSupports;
+
+    if (Array.isArray(supports) && supports.length > 0) {
+      for (const sup of supports) {
+        const chunkIndices = sup.groundingChunkIndices;
+        const segment = sup.segment;
+        if (Array.isArray(chunkIndices)) {
+          for (const idx of chunkIndices) {
+            const chunk = chunks[idx];
+            const url = chunk?.web?.uri;
+            if (url) {
+              citations.push({
+                url,
+                title: chunk?.web?.title || undefined,
+                startIndex: segment?.startIndex,
+                endIndex: segment?.endIndex,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Also include any chunks not covered by supports
+    for (const chunk of chunks) {
+      const url = chunk?.web?.uri;
+      if (url && !citations.some((c) => c.url === url)) {
+        citations.push({
+          url,
+          title: chunk?.web?.title || undefined,
+        });
+      }
+    }
+
+    return citations.length > 0 ? citations : undefined;
   }
 }

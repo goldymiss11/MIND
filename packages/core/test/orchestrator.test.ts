@@ -203,3 +203,316 @@ test("OrchestratorService: Execution Plan generated for complex intent", async (
   await svc.execute({ telegramUserId: 123, text: "Help me" });
   assert.ok(planRequested);
 });
+
+test("OrchestratorService: rejects empty input with validation_failure", async () => {
+  const svc = new OrchestratorService({ db: {} as any, ai: {} as any });
+  const res = await svc.execute({ telegramUserId: 123, text: "   " });
+  assert.equal(res.status, "failed");
+  assert.equal(res.errorCategory, "validation_failure");
+  assert.ok(res.response.includes("пустое"));
+});
+
+test("OrchestratorService: rejects oversized input with validation_failure", async () => {
+  const svc = new OrchestratorService({ db: {} as any, ai: {} as any });
+  const hugeText = "a".repeat(16001);
+  const res = await svc.execute({ telegramUserId: 123, text: hugeText });
+  assert.equal(res.status, "failed");
+  assert.equal(res.errorCategory, "validation_failure");
+  assert.ok(res.response.includes("превышает"));
+});
+
+test("OrchestratorService: blocks dangerous/confirmation-required tools without explicit confirmation", async () => {
+  // Register a mock tool requiring confirmation
+  const testToolName = "danger_action_" + Date.now();
+  let executed = false;
+  toolRegistry.register({
+    name: testToolName,
+    description: "Dangerous tool requiring user confirmation",
+    inputSchema: { type: "OBJECT" },
+    sideEffect: "external_write",
+    requiresConfirmation: true,
+    execute: async () => {
+      executed = true;
+      return { success: true };
+    }
+  });
+
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-1", telegramId: 123 }) },
+      conversations: { findFirst: async () => ({ id: "conv-1", userId: "user-1", telegramChatId: 123 }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }), limit: async () => [] }) }) }),
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({ result: { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] } }),
+    generateEmbedding: async () => ({ result: [0.1] }),
+    generateText: async (prompt: string, opts: any) => {
+      if (opts.history && opts.history.length > 0) {
+        // Second call after tool response
+        return { result: "Действие требует подтверждения.", functionCalls: [] };
+      }
+      return {
+        result: "",
+        functionCalls: [{ name: testToolName, args: {} }]
+      };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  const res = await svc.execute({ telegramUserId: 123, text: "Выполни опасное действие" });
+
+  assert.equal(executed, false);
+  assert.equal(res.errorCategory, "confirmation_required");
+  assert.ok(res.warnings.some(w => w.category === "confirmation_required"));
+
+  // Now execute WITH confirmation
+  const resConfirmed = await svc.execute({
+    telegramUserId: 123,
+    text: "Выполни опасное действие",
+    confirmedToolCalls: [testToolName]
+  });
+  assert.equal(executed, true);
+});
+
+test("OrchestratorService: handles race condition gracefully when user/conversation insert conflicts", async () => {
+  let userQueryCount = 0;
+  let userInserted = false;
+  let convQueryCount = 0;
+
+  const mockDb: any = {
+    query: {
+      users: {
+        findFirst: async () => {
+          userQueryCount++;
+          // First time returns null (simulating concurrent insert), second time returns existing user
+          return userQueryCount > 1 ? { id: "user-race-1", telegramId: 999 } : null;
+        }
+      },
+      conversations: {
+        findFirst: async () => {
+          convQueryCount++;
+          return convQueryCount > 1 ? { id: "conv-race-1", userId: "user-race-1", telegramChatId: 999 } : null;
+        }
+      },
+    },
+    insert: () => ({
+      values: () => ({
+        onConflictDoNothing: () => ({
+          returning: async () => {
+            // Simulates conflict: nothing returned
+            return [];
+          }
+        }),
+        returning: async () => [{ id: "msg-1" }]
+      })
+    }),
+    select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }), limit: async () => [] }) }) }),
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({ result: { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] } }),
+    generateEmbedding: async () => ({ result: [0.1] }),
+    generateText: async () => ({ result: "Race condition survived!", functionCalls: [] })
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  const res = await svc.execute({ telegramUserId: 999, text: "Hello from race condition" });
+
+  assert.equal(res.status, "success");
+  assert.equal(res.response, "Race condition survived!");
+  assert.ok(userQueryCount >= 2);
+  assert.ok(convQueryCount >= 2);
+});
+
+test("OrchestratorService: degrades gracefully when memory retrieval or saving fails", async () => {
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-1", telegramId: 123 }) },
+      conversations: { findFirst: async () => ({ id: "conv-1", userId: "user-1", telegramChatId: 123 }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }), limit: async () => [] }) }) }),
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({
+      result: {
+        intent: "chat",
+        hasMemory: true,
+        memories: [{ type: "preference", content: "Likes testing" }],
+        hasTask: false,
+        tasks: []
+      }
+    }),
+    generateText: async () => ({ result: "Answer despite memory failure", functionCalls: [] })
+  };
+
+  const mockMemory: any = {
+    saveMemories: async () => {
+      throw new Error("Memory database connection timeout");
+    },
+    retrieveRelevantMemories: async () => {
+      throw new Error("Vector embeddings quota exceeded");
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi, memory: mockMemory });
+  const res = await svc.execute({ telegramUserId: 123, text: "I like testing" });
+
+  assert.equal(res.status, "partial");
+  assert.equal(res.response, "Answer despite memory failure");
+  assert.ok(res.warnings.some(w => w.message.includes("Memory database connection timeout")));
+  assert.ok(res.warnings.some(w => w.message.includes("Vector embeddings quota exceeded")));
+});
+
+test("invokeSkillTool: rejects empty output without fake-success, logs AI run correctly", async () => {
+  const { invokeSkillTool } = await import("../src/tools/definitions.js");
+  const artifacts: any[] = [];
+  let loggedAction = "";
+  let loggedModel = "";
+
+  const mockContextEmpty: any = {
+    ai: {
+      generateText: async () => ({ result: "   ", model: "gemini-3.5-flash" })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async (action: string, res: any) => {
+      loggedAction = action;
+      loggedModel = res.model;
+    }
+  };
+
+  const emptyRes = await invokeSkillTool.execute(
+    { skillName: "document-generation", prompt: "Make document" },
+    mockContextEmpty
+  );
+
+  assert.equal(emptyRes.success, false);
+  assert.ok(emptyRes.error?.includes("пустой"));
+  assert.equal(artifacts.length, 0);
+
+  // Now test with non-empty content
+  const mockContextValid: any = {
+    ai: {
+      generateText: async () => ({ result: "# Real Markdown Document", model: "gemini-3.5-flash" })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async (action: string, res: any) => {
+      loggedAction = action;
+      loggedModel = res.model;
+    }
+  };
+
+  const validRes = await invokeSkillTool.execute(
+    { skillName: "document-generation", prompt: "Make document" },
+    mockContextValid
+  );
+
+  assert.equal(validRes.success, true);
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0]?.content, "# Real Markdown Document");
+  assert.ok(loggedAction.includes("document-generation"));
+  assert.equal(loggedModel, "gemini-3.5-flash");
+});
+
+test("OrchestratorService: intent=research enables googleSearch, adds untrusted guardrail, formats sources block, and returns citations", async () => {
+  let passedOptions: any = null;
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-1", telegramId: 123 }) },
+      conversations: { findFirst: async () => ({ id: "conv-1", userId: "user-1", telegramChatId: 123 }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }), limit: async () => [] }) }) }),
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({
+      result: {
+        intent: "research",
+        hasMemory: false,
+        memories: [],
+        hasTask: false,
+        tasks: []
+      }
+    }),
+    generateEmbedding: async () => ({ result: [0.1] }),
+    generateText: async (prompt: string, opts: any) => {
+      passedOptions = opts;
+      return {
+        result: "Согласно последним исследованиям, сверхпроводимость была подтверждена.",
+        citations: [
+          { url: "https://nature.com/articles/supercond", title: "Nature Superconductivity" },
+          { url: "https://arxiv.org/abs/1234", title: "arXiv Preprint" }
+        ],
+        model: "gemini-3.5-flash"
+      };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  const res = await svc.execute({ telegramUserId: 123, text: "Что нового в физике сверхпроводников?" });
+
+  assert.equal(res.status, "success");
+  // Check that googleSearch was enabled
+  assert.equal(passedOptions.googleSearch, true);
+  // Check security guardrail against prompt injection in system instruction
+  assert.ok(passedOptions.systemInstruction.includes("untrusted input"));
+  assert.ok(passedOptions.systemInstruction.includes("prompt injection"));
+  // Check sources block formatted in response
+  assert.ok(res.response.includes("Согласно последним исследованиям"));
+  assert.ok(res.response.includes("Источники:"));
+  assert.ok(res.response.includes("• Nature Superconductivity — https://nature.com/articles/supercond"));
+  assert.ok(res.response.includes("• arXiv Preprint — https://arxiv.org/abs/1234"));
+  // Check citations returned in structured result
+  assert.ok(Array.isArray(res.citations));
+  assert.equal(res.citations.length, 2);
+  assert.equal(res.citations[0]?.url, "https://nature.com/articles/supercond");
+});
+
+test("OrchestratorService: intent=chat does not enable googleSearch and does not append sources block", async () => {
+  let passedOptions: any = null;
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-1", telegramId: 123 }) },
+      conversations: { findFirst: async () => ({ id: "conv-1", userId: "user-1", telegramChatId: 123 }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }), limit: async () => [] }) }) }),
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({
+      result: {
+        intent: "chat",
+        hasMemory: false,
+        memories: [],
+        hasTask: false,
+        tasks: []
+      }
+    }),
+    generateEmbedding: async () => ({ result: [0.1] }),
+    generateText: async (prompt: string, opts: any) => {
+      passedOptions = opts;
+      return {
+        result: "Привет! Чем могу помочь?",
+        model: "llama-3.3-70b"
+      };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  const res = await svc.execute({ telegramUserId: 123, text: "Привет!" });
+
+  assert.equal(res.status, "success");
+  assert.equal(passedOptions.googleSearch, false);
+  assert.ok(!passedOptions.systemInstruction.includes("untrusted input"));
+  assert.ok(!res.response.includes("Источники:"));
+  assert.equal(res.citations, undefined);
+});
+
+
+
