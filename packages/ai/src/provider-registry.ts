@@ -8,5 +8,6 @@ export interface ProviderConfig {
 export const PROVIDER_REGISTRY: Record<string, ProviderConfig> = {
   gemini: { id: "gemini", enabled: true, health: "healthy" },
   groq: { id: "groq", enabled: true, health: "healthy" },
-  cerebras: { id: "cerebras", enabled: true, health: "healthy" }
+  cerebras: { id: "cerebras", enabled: true, health: "healthy" },
+  openrouter: { id: "openrouter", enabled: true, health: "healthy" }
 };

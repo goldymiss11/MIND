@@ -67,6 +67,20 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     contextWindow: 8192,
     tiers: ["standard", "complex"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
+  },
+  "meta-llama/llama-3.3-70b-instruct:free": {
+    provider: "openrouter",
+    model: "meta-llama/llama-3.3-70b-instruct:free",
+    pricingClass: "free",
+    tiers: ["standard", "complex"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
+  },
+  "meta-llama/llama-3.1-8b-instruct:free": {
+    provider: "openrouter",
+    model: "meta-llama/llama-3.1-8b-instruct:free",
+    pricingClass: "free",
+    tiers: ["simple"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   }
 };
 

@@ -184,9 +184,15 @@ export class OrchestratorService {
 
     // 3. Intent & Context Extraction
     const systemPrompt = "Analyze the user message to extract personal memories and actionable tasks. If the request requires multiple steps (like writing a long document or running a script), set intent='complex'. If the user asks to research, search the web, find current information, check facts or news, set intent='research'. Otherwise use 'chat', 'task', or 'memory'.";
-    const analyzerRes = await this.ai.generateStructured<any>(request.text, ANALYZER_SCHEMA, { tier: "simple", systemInstruction: systemPrompt });
-    await this.logAiRun(user.id, "unified_analyzer", analyzerRes);
-    const analyzerData = analyzerRes.result;
+    let analyzerData: any = { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] };
+    try {
+      const analyzerRes = await this.ai.generateStructured<any>(request.text, ANALYZER_SCHEMA, { tier: "simple", systemInstruction: systemPrompt });
+      await this.logAiRun(user.id, "unified_analyzer", analyzerRes);
+      analyzerData = analyzerRes.result;
+    } catch (analyzerErr: any) {
+      console.warn("[OrchestratorService] Unified analyzer degraded, falling back to chat intent:", analyzerErr);
+      warnings.push({ message: `Analyzer degraded: ${analyzerErr.message}`, category: "provider_failure" });
+    }
     
     // Process Memories with Deduplication via MemoryService (P0-1 Graceful Degradation)
     if (analyzerData?.hasMemory && Array.isArray(analyzerData.memories)) {
@@ -234,16 +240,22 @@ export class OrchestratorService {
     // 4. Execution Plan (if complex)
     let executionPlan: ExecutionPlan | null = null;
     if (analyzerData?.intent === "complex") {
-      const planRes = await this.ai.generateStructured<ExecutionPlan>(request.text, EXECUTION_PLAN_SCHEMA, {
-        tier: "complex",
-        systemInstruction: "Create a bounded execution plan for this complex request. Limit to 3 steps max."
-      });
-      await this.logAiRun(user.id, "execution_plan", planRes);
-      executionPlan = planRes.result;
-      
-      // Validate plan
-      if (!executionPlan.goal || !Array.isArray(executionPlan.steps) || executionPlan.steps.length > 5) {
-        warnings.push({ message: "Plan validation failed or too many steps. Reverting to standard chat flow." });
+      try {
+        const planRes = await this.ai.generateStructured<ExecutionPlan>(request.text, EXECUTION_PLAN_SCHEMA, {
+          tier: "complex",
+          systemInstruction: "Create a bounded execution plan for this complex request. Limit to 3 steps max."
+        });
+        await this.logAiRun(user.id, "execution_plan", planRes);
+        executionPlan = planRes.result;
+        
+        // Validate plan
+        if (!executionPlan.goal || !Array.isArray(executionPlan.steps) || executionPlan.steps.length > 5) {
+          warnings.push({ message: "Plan validation failed or too many steps. Reverting to standard chat flow." });
+          executionPlan = null;
+        }
+      } catch (planErr: any) {
+        console.warn("[OrchestratorService] Execution plan failed, falling back to standard chat:", planErr);
+        warnings.push({ message: `Execution plan degraded: ${planErr.message}` });
         executionPlan = null;
       }
     }

@@ -13,3 +13,4 @@ export const aiService = new AiService();
 export * from "./provider.js";
 export * from "./providers/groq.provider.js";
 export * from "./providers/cerebras.provider.js";
+export * from "./providers/openrouter.provider.js";

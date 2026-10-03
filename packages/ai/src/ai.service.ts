@@ -11,6 +11,7 @@ import { ProviderError, ProviderErrorCode, AIProvider } from "./provider.js";
 import { GeminiProvider } from "./providers/gemini.provider.js";
 import { GroqProvider } from "./providers/groq.provider.js";
 import { CerebrasProvider } from "./providers/cerebras.provider.js";
+import { OpenRouterProvider } from "./providers/openrouter.provider.js";
 import { AiRouter, AiRoutingDecision } from "./router.js";
 
 export interface ExtendedAiServiceConfig extends AiServiceConfig {
@@ -18,12 +19,13 @@ export interface ExtendedAiServiceConfig extends AiServiceConfig {
   groqClient?: Groq;
   cerebrasApiKey?: string;
   cerebrasClient?: Cerebras;
+  openrouterApiKey?: string;
   allowPaidAi?: boolean;
 }
 
 /**
  * High-level AiService.
- * In Phase 4, it holds GeminiProvider, GroqProvider, and CerebrasProvider,
+ * Holds GeminiProvider, GroqProvider, CerebrasProvider, and OpenRouterProvider,
  * and routes operations via AiRouter.
  */
 export class AiService {
@@ -34,11 +36,13 @@ export class AiService {
     const gemini = new GeminiProvider(config?.apiKey, config?.client);
     const groq = new GroqProvider(config?.groqApiKey, config?.groqClient);
     const cerebras = new CerebrasProvider(config?.cerebrasApiKey, config?.cerebrasClient);
+    const openrouter = new OpenRouterProvider(config?.openrouterApiKey);
 
     this.providers = {
       gemini,
       groq,
       cerebras,
+      openrouter,
     };
     
     this.router = new AiRouter({ allowPaid: config?.allowPaidAi });
@@ -115,8 +119,8 @@ export class AiService {
          );
 
          if (attempt < maxRetries) {
-           if (code === ProviderErrorCode.QUOTA_EXCEEDED) {
-             // Permanent exhaustion on this provider.
+           if (code === ProviderErrorCode.QUOTA_EXCEEDED || code === ProviderErrorCode.AUTH_ERROR) {
+             // Permanent exhaustion or missing credentials on this provider.
              // Only retry if an alternative provider is available without explicit model pinning.
              if (!isExplicitModel && operation !== "embedding") {
                try {
@@ -131,18 +135,41 @@ export class AiService {
                      googleSearch: Boolean(options?.googleSearch)
                    }
                  });
-                 console.warn(`Quota exceeded on provider ${decision.providerId}. Switching to alternative provider...`);
+                 console.warn(`${code} on provider ${decision.providerId}. Switching to alternative provider...`);
                  continue; // Switch to alternative provider immediately without backoff delay
                } catch {
                  // No alternative available
                }
              }
 
-             console.error(`Fatal API error (QUOTA_EXCEEDED) on provider ${decision.providerId}: no alternatives available.`);
+             console.error(`Fatal API error (${code}) on provider ${decision.providerId}: no alternatives available.`);
              throw error;
            }
 
            if (canRetrySameProvider) {
+             // If another healthy provider is available, prefer switching immediately rather than waiting for backoff
+             if (!isExplicitModel && operation !== "embedding") {
+               try {
+                 const hasTools = options?.tools && options.tools.length > 0;
+                 const nextDecision = this.router.route({
+                   operation,
+                   tier: options?.tier ?? "standard",
+                   requiredCapabilities: {
+                     tools: hasTools,
+                     structuredOutput: operation === "structured",
+                     embeddings: false,
+                     googleSearch: Boolean(options?.googleSearch)
+                   }
+                 });
+                 if (nextDecision.providerId !== decision.providerId && this.router.getProviderHealth(nextDecision.providerId).status === "healthy") {
+                   console.warn(`Provider ${decision.providerId} (${code}). Switching immediately to healthy provider ${nextDecision.providerId}...`);
+                   continue;
+                 }
+               } catch {
+                 // Fall through to same-provider backoff retry
+               }
+             }
+
              console.warn(`API error (${code}) on provider ${decision.providerId}. Retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
              await new Promise((resolve) => setTimeout(resolve, delay));
              delay = Math.round(delay * 2);
