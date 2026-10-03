@@ -9,6 +9,13 @@ import type {
   MemoryServiceOptions,
 } from "./types.js";
 
+export function sanitizeImportance(val: any): number {
+  if (val === undefined || val === null || isNaN(Number(val))) return 1;
+  const num = Number(val);
+  if (num > 0 && num <= 1) return Math.max(1, Math.min(10, Math.round(num * 10)));
+  return Math.max(1, Math.min(10, Math.round(num)));
+}
+
 export const MEMORY_EXTRACTION_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -137,7 +144,7 @@ export class MemoryService {
               userId,
               type: mem.type || "semantic",
               content: mem.content,
-              importance: mem.importance ?? 1,
+              importance: sanitizeImportance(mem.importance),
               confidence: mem.confidence ?? 1.0,
               source: "conversation",
               sourceMessageId: options?.sourceMessageId ?? null,
@@ -169,7 +176,7 @@ export class MemoryService {
               userId,
               type: mem.type || "semantic",
               content: mem.content,
-              importance: mem.importance ?? 1,
+              importance: sanitizeImportance(mem.importance),
               confidence: mem.confidence ?? 1.0,
               source: "conversation",
               sourceMessageId: options?.sourceMessageId ?? null,

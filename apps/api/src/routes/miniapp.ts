@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { validateWebAppData, parseInitData } from "../lib/auth.js";
 import { db, users, tasks, memories, messages } from "@mind/db";
-import { eq, desc, and, count } from "drizzle-orm";
+import { eq, desc, and, count, inArray, isNotNull, gt, asc } from "drizzle-orm";
 
 export default async function miniappRoutes(app: FastifyInstance) {
   
@@ -49,22 +49,24 @@ export default async function miniappRoutes(app: FastifyInstance) {
   app.get("/home", async (request: FastifyRequest, reply: FastifyReply) => {
     const user = (request as any).user;
     
-    // active tasks count
+    // active tasks count (inbox and in_progress)
     const tasksCountResult = await db.select({ count: count() })
       .from(tasks)
-      .where(and(eq(tasks.userId, user.id), eq(tasks.status, 'in_progress')));
+      .where(and(eq(tasks.userId, user.id), inArray(tasks.status, ['inbox', 'in_progress'])));
     const activeTasksCount = tasksCountResult[0]?.count || 0;
     
-    // ближайший deadline
+    // ближайший будущий deadline
     const nextDeadlineTask = await db.select()
       .from(tasks)
       .where(
         and(
           eq(tasks.userId, user.id),
-          eq(tasks.status, 'in_progress')
+          inArray(tasks.status, ['inbox', 'in_progress']),
+          isNotNull(tasks.deadline),
+          gt(tasks.deadline, new Date())
         )
       )
-      .orderBy(tasks.deadline)
+      .orderBy(asc(tasks.deadline))
       .limit(1);
       
     // recent memories
@@ -192,11 +194,18 @@ export default async function miniappRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Memory content is required" });
     }
 
+    let importance = 1;
+    if (typeof body.importance === "number") {
+      importance = Math.round(body.importance <= 1 && body.importance > 0 ? body.importance * 10 : body.importance);
+    }
+    if (isNaN(importance) || importance < 1) importance = 1;
+    if (importance > 10) importance = 10;
+
     const inserted = await db.insert(memories).values({
       userId: user.id,
       type: body.type || "semantic",
       content,
-      importance: typeof body.importance === "number" ? body.importance : 0.8,
+      importance,
     }).returning();
 
     return reply.status(201).send(inserted[0]);

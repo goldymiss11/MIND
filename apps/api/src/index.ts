@@ -91,11 +91,36 @@ async function start() {
     app.log.info("REDIS_URL is not set. Embedded proactive worker will not start.");
   }
 
+  // Periodic proactive reminder ticker (every 60 seconds)
+  let reminderInterval: NodeJS.Timeout | null = null;
+  if (bot) {
+    const { scanReminders } = await import("@mind/worker");
+    const { db } = await import("@mind/db");
+    reminderInterval = setInterval(async () => {
+      try {
+        if (bot?.api) {
+          await scanReminders(db, bot.api);
+        }
+      } catch (scanErr) {
+        app.log.warn({ err: scanErr }, "Periodic scanReminders encountered error");
+      }
+    }, 60000);
+    setTimeout(() => {
+      if (bot?.api) {
+        scanReminders(db, bot.api).catch((err) => app.log.warn({ err }, "Initial scanReminders error"));
+      }
+    }, 5000);
+    app.log.info("Proactive reminder heartbeat active (60s interval)");
+  }
+
   try {
     await app.listen({ port, host });
     app.log.info(`MIND API listening on ${host}:${port}`);
   } catch (err) {
     app.log.error(err);
+    if (reminderInterval) {
+      clearInterval(reminderInterval);
+    }
     if (stopWorkerFn) {
       await stopWorkerFn().catch(() => {});
     }
@@ -108,6 +133,9 @@ async function start() {
   const closeGracefully = async (signal: string) => {
     isShuttingDown = true;
     app.log.info(`Received ${signal}, shutting down gracefully...`);
+    if (reminderInterval) {
+      clearInterval(reminderInterval);
+    }
     if (stopWorkerFn) {
       try {
         await stopWorkerFn();

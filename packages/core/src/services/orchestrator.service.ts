@@ -15,6 +15,51 @@ export type { ExtractedMemoryItem, ExecutionRequest };
 export { EXECUTION_PLAN_SCHEMA };
 export interface ExtractedTaskItem { title: string; description?: string | null; deadline?: string | null; priority?: string; projectName?: string | null; }
 
+export function parseRelativeOrIsoDeadline(rawDeadline?: string | null): Date | null {
+  if (!rawDeadline || typeof rawDeadline !== "string") return null;
+  const trimmed = rawDeadline.trim();
+  if (!trimmed) return null;
+
+  const isoParsed = new Date(trimmed);
+  if (!isNaN(isoParsed.getTime()) && !/^\d+$/.test(trimmed)) {
+    return isoParsed;
+  }
+
+  const now = Date.now();
+  const lower = trimmed.toLowerCase();
+
+  const minMatch = lower.match(/(?:через|in)\s+(\d+)\s*(?:минут|мин|минуту|минуты|minutes?|mins?)/i);
+  if (minMatch && minMatch[1]) {
+    return new Date(now + parseInt(minMatch[1], 10) * 60 * 1000);
+  }
+
+  const hourMatch = lower.match(/(?:через|in)\s+(\d+)\s*(?:часов|часа|час|ч|hours?|hrs?)/i);
+  if (hourMatch && hourMatch[1]) {
+    return new Date(now + parseInt(hourMatch[1], 10) * 3600 * 1000);
+  }
+
+  const dayMatch = lower.match(/(?:через|in)\s+(\d+)\s*(?:дней|дня|день|дн|days?)/i);
+  if (dayMatch && dayMatch[1]) {
+    return new Date(now + parseInt(dayMatch[1], 10) * 86400 * 1000);
+  }
+
+  if (lower.includes("завтра") || lower.includes("tomorrow")) {
+    return new Date(now + 24 * 3600 * 1000);
+  }
+
+  const timeMatch = lower.match(/(?:в|at)\s+(\d{1,2})[:.](\d{2})/i);
+  if (timeMatch && timeMatch[1] && timeMatch[2]) {
+    const d = new Date(now);
+    d.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
+    if (d.getTime() < now) {
+      d.setDate(d.getDate() + 1);
+    }
+    return d;
+  }
+
+  return null;
+}
+
 export const ANALYZER_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -24,7 +69,7 @@ export const ANALYZER_SCHEMA = {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
-        properties: { type: { type: Type.STRING }, content: { type: Type.STRING }, importance: { type: Type.NUMBER } },
+        properties: { type: { type: Type.STRING }, content: { type: Type.STRING }, importance: { type: Type.INTEGER } },
         required: ["type", "content"]
       }
     },
@@ -33,7 +78,13 @@ export const ANALYZER_SCHEMA = {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
-        properties: { title: { type: Type.STRING }, description: { type: Type.STRING }, deadline: { type: Type.STRING }, priority: { type: Type.STRING }, projectName: { type: Type.STRING } },
+        properties: {
+          title: { type: Type.STRING },
+          description: { type: Type.STRING },
+          deadline: { type: Type.STRING, description: "Absolute ISO 8601 UTC timestamp or relative string like 'через 5 минут'" },
+          priority: { type: Type.STRING, enum: ["low", "normal", "high", "urgent"] },
+          projectName: { type: Type.STRING }
+        },
         required: ["title"]
       }
     }
@@ -183,7 +234,27 @@ export class OrchestratorService {
     const sourceMessageId = insertedMessages?.[0]?.id;
 
     // 3. Intent & Context Extraction
-    const systemPrompt = "Analyze the user message to extract personal memories and actionable tasks. If the request requires multiple steps (like writing a long document or running a script), set intent='complex'. If the user asks to research, search the web, find current information, check facts or news, set intent='research'. Otherwise use 'chat', 'task', or 'memory'.";
+    const nowIso = new Date().toISOString();
+    const systemPrompt = `Analyze the user message to extract personal memories and actionable tasks/events/reminders.
+Current UTC Time: ${nowIso}.
+
+Rules:
+1. Intent:
+   - 'complex': if the request requires multiple steps (writing a long document, running code, complex multi-step workflow).
+   - 'research': if the user asks to research, search the web, find current news, check facts.
+   - 'task': if the user mentions any task, meeting, event, appointment, reminder, deadline, or plan (e.g. "мне через 5 минут на встречу с инвесторами", "напомни мне сделать X", "завтра в 10 созвон").
+   - 'memory': if user states facts about themselves, preferences, notes to remember.
+   - 'chat': general conversational greeting or questions without new tasks/memories.
+
+2. Tasks & Events (hasTask):
+   - Whenever the user mentions ANY upcoming meeting, appointment, deadline, reminder, or thing they need to do, set hasTask=true!
+   - Extract title (e.g. "Встреча с инвесторами"), description, priority (set "urgent" or "high" if deadline is imminent), and deadline.
+   - For deadline: specify either an ISO 8601 UTC timestamp calculated using Current UTC Time, or the relative phrase like "через 5 минут", "завтра в 15:00".
+
+3. Memories (hasMemory):
+   - Extract enduring facts, personal details, preferences, key context about the user.
+   - importance must be an integer from 1 to 10 (e.g. 5, 8, 10).`;
+
     let analyzerData: any = { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] };
     try {
       const analyzerRes = await this.ai.generateStructured<any>(request.text, ANALYZER_SCHEMA, { tier: "simple", systemInstruction: systemPrompt });
@@ -209,6 +280,7 @@ export class OrchestratorService {
     }
 
     // Process Tasks
+    const newlyCreatedTaskSummaries: string[] = [];
     if (analyzerData?.hasTask && Array.isArray(analyzerData.tasks)) {
       for (const task of analyzerData.tasks) {
         if (!task.title) continue;
@@ -222,18 +294,29 @@ export class OrchestratorService {
           }
         }
         
-        let deadlineDate = null;
+        let deadlineDate: Date | null = null;
         if (task.deadline) {
-          const pd = new Date(task.deadline);
-          if (!isNaN(pd.getTime())) deadlineDate = pd;
+          deadlineDate = parseRelativeOrIsoDeadline(task.deadline);
         }
 
+        const initialStatus = deadlineDate ? "in_progress" : "inbox";
+        const priority = task.priority || (deadlineDate ? "urgent" : "normal");
+
         const insertedTask = await this.db.insert(schema.tasks).values({
-          userId: user.id, title: task.title, description: task.description,
-          deadline: deadlineDate, priority: task.priority || "normal", status: "inbox",
+          userId: user.id,
+          title: task.title,
+          description: task.description,
+          deadline: deadlineDate,
+          priority: priority,
+          status: initialStatus,
           projectId: projId, 
         }).returning();
-        createdTasks.push(insertedTask[0]!.id as string);
+
+        const insertedId = insertedTask[0]!.id as string;
+        createdTasks.push(insertedId);
+        newlyCreatedTaskSummaries.push(
+          `«${task.title}»${deadlineDate ? ` (дедлайн: ${deadlineDate.toISOString()})` : ""}`
+        );
       }
     }
 
@@ -284,7 +367,15 @@ export class OrchestratorService {
 
     // 6. Bounded Execution Loop
     let loopInstruction = `Ты MIND — персональный AI-ассистент.
-Текущее время: ${new Date().toISOString()}.`;
+Текущее время UTC: ${nowIso}.`;
+
+    if (newlyCreatedTaskSummaries.length > 0) {
+      loopInstruction += `\n\n[ВАЖНО: Задачи/напоминания сохранены в базу]\n` +
+        `Ты только что успешно создал следующие задачи/напоминания:\n` +
+        newlyCreatedTaskSummaries.map((s) => `- ${s}`).join("\n") +
+        `\nОбязательно четко подтверди пользователю, что ты зафиксировал задачу и обязательно напомнишь о ней вовремя!`;
+    }
+
     if (relevantMemories.length > 0) {
       const formattedMemories = relevantMemories.map(m => {
         const c = String(m.content ?? "").trim();
@@ -296,9 +387,10 @@ export class OrchestratorService {
       const formattedTasks = activeTasksDb.map(t => {
         const title = String(t.title ?? "").trim();
         const shortTitle = title.length > 200 ? title.slice(0, 197) + "..." : title;
-        return `- [${t.id}] ${shortTitle} (${t.status})`;
+        const deadlineInfo = t.deadline ? ` [Дедлайн: ${new Date(t.deadline).toISOString()}]` : "";
+        return `- [${t.id}] ${shortTitle} (статус: ${t.status})${deadlineInfo}`;
       });
-      loopInstruction += "\n\nАктивные задачи:\n" + formattedTasks.join("\n");
+      loopInstruction += "\n\nАктивные задачи и напоминания в базе данных:\n" + formattedTasks.join("\n");
     }
     if (executionPlan) {
       loopInstruction += "\n\nПлан выполнения:\n" + JSON.stringify(executionPlan, null, 2);
