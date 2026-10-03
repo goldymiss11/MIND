@@ -316,16 +316,40 @@ export class OrchestratorService {
           googleSearch: isResearch,
         });
       } catch (e: any) {
-        return {
-          status: "failed",
-          response: "Извините, произошла ошибка при обращении к AI-модели. Пожалуйста, попробуйте еще раз.",
-          artifacts,
-          createdTasks,
-          updatedMemories,
-          warnings: [{ message: e.message, category: "provider_failure" }],
-          executionId,
-          errorCategory: "provider_failure"
-        };
+        if (isResearch) {
+          try {
+            warnings.push({ message: `Web search temporarily unavailable: ${e.message}. Falling back to internal knowledge.`, category: "provider_failure" });
+            chatRes = await this.ai.generateText(iterations === 1 ? request.text : "", {
+              tier: executionPlan ? "complex" : "standard",
+              systemInstruction: loopInstruction,
+              history: iterations === 1 ? history.slice(0, -1) : currentHistory,
+              tools: [{ functionDeclarations: aiTools }],
+              googleSearch: false,
+            });
+          } catch (fallbackErr: any) {
+            return {
+              status: "failed",
+              response: "Извините, произошла ошибка при обращении к AI-модели. Пожалуйста, попробуйте еще раз.",
+              artifacts,
+              createdTasks,
+              updatedMemories,
+              warnings: [{ message: fallbackErr.message, category: "provider_failure" }],
+              executionId,
+              errorCategory: "provider_failure"
+            };
+          }
+        } else {
+          return {
+            status: "failed",
+            response: "Извините, произошла ошибка при обращении к AI-модели. Пожалуйста, попробуйте еще раз.",
+            artifacts,
+            createdTasks,
+            updatedMemories,
+            warnings: [{ message: e.message, category: "provider_failure" }],
+            executionId,
+            errorCategory: "provider_failure"
+          };
+        }
       }
       await this.logAiRun(user.id, "execution_loop", chatRes);
 

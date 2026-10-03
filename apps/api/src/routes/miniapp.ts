@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { validateWebAppData, parseInitData } from "../lib/auth.js";
-import { db, users, tasks, memories } from "@mind/db";
+import { db, users, tasks, memories, messages } from "@mind/db";
 import { eq, desc, and, count } from "drizzle-orm";
 
 export default async function miniappRoutes(app: FastifyInstance) {
@@ -97,6 +97,43 @@ export default async function miniappRoutes(app: FastifyInstance) {
     return reply.send(userTasks);
   });
 
+  app.post("/tasks", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = (request as any).user;
+    const body = request.body as any;
+
+    const title = body?.title?.trim();
+    if (!title) {
+      return reply.status(400).send({ error: "Task title is required" });
+    }
+
+    let deadlineDate: Date | null = null;
+    if (body.deadline) {
+      const parsed = new Date(body.deadline);
+      if (!isNaN(parsed.getTime())) deadlineDate = parsed;
+    }
+
+    const inserted = await db.insert(tasks).values({
+      userId: user.id,
+      title,
+      description: body.description?.trim() || null,
+      priority: body.priority || "normal",
+      status: "in_progress",
+      deadline: deadlineDate,
+    }).returning();
+
+    return reply.status(201).send(inserted[0]);
+  });
+
+  app.delete("/tasks/:id", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = (request as any).user;
+    const { id } = request.params as any;
+
+    if (!id) return reply.status(400).send({ error: "Task ID is required" });
+
+    await db.delete(tasks).where(and(eq(tasks.id, id), eq(tasks.userId, user.id)));
+    return reply.send({ success: true });
+  });
+
   app.patch("/tasks/:id", async (request: FastifyRequest, reply: FastifyReply) => {
     const user = (request as any).user;
     const { id } = request.params as any;
@@ -113,7 +150,14 @@ export default async function miniappRoutes(app: FastifyInstance) {
     }
     
     const updateData: any = {};
-    if (body.status) updateData.status = body.status;
+    if (body.status) {
+      updateData.status = body.status;
+      if (body.status === "completed") {
+        updateData.completedAt = new Date();
+      } else {
+        updateData.completedAt = null;
+      }
+    }
     if (body.title) updateData.title = body.title;
     if (body.description !== undefined) updateData.description = body.description;
     
@@ -139,8 +183,70 @@ export default async function miniappRoutes(app: FastifyInstance) {
     return reply.send(userMemories);
   });
 
+  app.post("/memories", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = (request as any).user;
+    const body = request.body as any;
+
+    const content = body?.content?.trim();
+    if (!content) {
+      return reply.status(400).send({ error: "Memory content is required" });
+    }
+
+    const inserted = await db.insert(memories).values({
+      userId: user.id,
+      type: body.type || "semantic",
+      content,
+      importance: typeof body.importance === "number" ? body.importance : 0.8,
+    }).returning();
+
+    return reply.status(201).send(inserted[0]);
+  });
+
+  app.delete("/memories/:id", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = (request as any).user;
+    const { id } = request.params as any;
+
+    if (!id) return reply.status(400).send({ error: "Memory ID is required" });
+
+    await db.delete(memories).where(and(eq(memories.id, id), eq(memories.userId, user.id)));
+    return reply.send({ success: true });
+  });
+
   app.get("/artifacts", async (_request: FastifyRequest, reply: FastifyReply) => {
-    // Artifact generation logic is likely not fully implemented, returning empty for now
-    return reply.send([]);
+    // Find assistant messages with generated articles or structured long content
+    const assistantMessages = await db.select()
+      .from(messages)
+      .where(eq(messages.role, "assistant"))
+      .orderBy(desc(messages.createdAt))
+      .limit(20);
+
+    const artifactItems: any[] = [];
+    for (const msg of assistantMessages) {
+      const text = msg.content || "";
+      if (text.startsWith("#") || text.includes("Статья") || text.includes("Как работает") || text.length > 500) {
+        const titleMatch = text.match(/^#\s+(.+)$/m);
+        const name = titleMatch && titleMatch[1] ? `${titleMatch[1].slice(0, 40)}.md` : `Document_${msg.id.slice(0, 8)}.md`;
+        artifactItems.push({
+          id: msg.id,
+          name,
+          type: "MARKDOWN",
+          content: text,
+          createdAt: msg.createdAt ? msg.createdAt.toISOString() : new Date().toISOString()
+        });
+      }
+    }
+
+    // Default item if none generated yet so the section is clear and usable
+    if (artifactItems.length === 0) {
+      artifactItems.push({
+        id: "sample-doc-1",
+        name: "Как работает AI.md",
+        type: "MARKDOWN",
+        content: "# Как работает AI\n\nИскусственный интеллект построен на нейросетевых моделях трансформаторов...",
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    return reply.send(artifactItems);
   });
 }

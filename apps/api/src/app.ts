@@ -35,6 +35,8 @@ export function buildServer(): FastifyInstance {
       }
       cb(null, true);
     },
+    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     credentials: true,
   });
 
