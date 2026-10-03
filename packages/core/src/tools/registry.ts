@@ -29,6 +29,7 @@ export class ToolRegistry {
 
 export const toolRegistry = new ToolRegistry();
 
-import { updateTaskTool, invokeSkillTool } from "./definitions.js";
+import { updateTaskTool, deleteTaskTool, invokeSkillTool } from "./definitions.js";
 toolRegistry.register(updateTaskTool);
+toolRegistry.register(deleteTaskTool);
 toolRegistry.register(invokeSkillTool);

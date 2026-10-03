@@ -514,5 +514,67 @@ test("OrchestratorService: intent=chat does not enable googleSearch and does not
   assert.equal(res.citations, undefined);
 });
 
+test("deleteTaskTool: deletes task by taskId or taskTitle", async () => {
+  const { deleteTaskTool } = await import("../src/tools/definitions.js");
+  let deletedId = "";
+  const mockDb: any = {
+    query: {
+      tasks: {
+        findFirst: async () => ({ id: "task-uuid-1", title: "Встреча с инвесторами" })
+      }
+    },
+    select: () => ({
+      from: () => ({
+        where: async () => [{ id: "task-uuid-2", title: "Купить молоко" }]
+      })
+    }),
+    delete: () => ({
+      where: async () => {
+        deletedId = "deleted";
+      }
+    })
+  };
+
+  const res1 = await deleteTaskTool.execute(
+    { taskId: "task-uuid-1" },
+    { db: mockDb, user: { id: "user-1" } }
+  );
+  assert.equal(res1.success, true);
+  assert.ok(res1.message.includes("Встреча с инвесторами"));
+
+  const res2 = await deleteTaskTool.execute(
+    { taskTitle: "молоко" },
+    { db: mockDb, user: { id: "user-1" } }
+  );
+  assert.equal(res2.success, true);
+  assert.ok(res2.message.includes("Купить молоко"));
+});
+
+test("invokeSkillTool: generates binary DOCX buffer when format='docx' requested", async () => {
+  const { invokeSkillTool } = await import("../src/tools/definitions.js");
+  const artifacts: any[] = [];
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({
+        result: "# Моя статья\n\nЭто текст в формате Markdown для **Word**.",
+        model: "gemini-2.5-flash"
+      })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    { skillName: "document-generation", prompt: "Сделай статью в формате docx", format: "docx" },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(artifacts.length, 1);
+  assert.ok(artifacts[0]?.name.endsWith(".docx"));
+  assert.ok(Buffer.isBuffer(artifacts[0]?.content));
+  assert.ok(artifacts[0]?.content.length > 500);
+});
+
 
 

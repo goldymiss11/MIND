@@ -22,7 +22,7 @@ export interface ExecutionWarning {
 
 export interface ExecutionArtifact {
   name: string;
-  content: string;
+  content: string | Buffer;
 }
 
 export interface ExecutionRequest {

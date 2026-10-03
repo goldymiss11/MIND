@@ -92,14 +92,66 @@ export const updateTaskTool: ToolDefinition = {
   }
 };
 
+export const deleteTaskTool: ToolDefinition = {
+  name: "delete_task",
+  description: "Удаляет задачу пользователя из базы данных по её taskId или названию.",
+  inputSchema: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.STRING, description: "UUID задачи для удаления (если известен из активных задач)" },
+      taskTitle: { type: Type.STRING, description: "Название или ключевые слова задачи, если ID неизвестен" }
+    }
+  },
+  sideEffect: "internal_write",
+  requiresConfirmation: false,
+  execute: async (args: any, context: any) => {
+    const { db, user } = context;
+    const taskId = args.taskId?.trim();
+    const taskTitle = args.taskTitle?.trim();
+
+    if (!taskId && !taskTitle) {
+      return { success: false, error: "Укажите taskId или taskTitle для удаления" };
+    }
+
+    let targetTask = null;
+    if (taskId) {
+      targetTask = await db.query.tasks.findFirst({
+        where: and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, user.id))
+      });
+    }
+
+    if (!targetTask && taskTitle) {
+      const allTasks = await db.select().from(schema.tasks).where(eq(schema.tasks.userId, user.id));
+      targetTask = allTasks.find((t: any) =>
+        t.title.toLowerCase().includes(taskTitle.toLowerCase()) ||
+        taskTitle.toLowerCase().includes(t.title.toLowerCase())
+      );
+    }
+
+    if (!targetTask) {
+      return { success: false, error: "Задача не найдена среди ваших активных задач." };
+    }
+
+    await db.delete(schema.tasks).where(and(eq(schema.tasks.id, targetTask.id), eq(schema.tasks.userId, user.id)));
+
+    return {
+      success: true,
+      message: `Задача «${targetTask.title}» успешно удалена.`
+    };
+  }
+};
+
+import { markdownToDocx } from "../artifacts/docx.renderer.js";
+
 export const invokeSkillTool: ToolDefinition = {
   name: "invoke_skill",
-  description: "Вызывает специализированный навык (agent skill), например 'document-generation' для создания структурированных текстов, лонгридов, статей и документов в формате Markdown.",
+  description: "Вызывает специализированный навык (agent skill), например 'document-generation' для создания структурированных текстов, лонгридов, статей и документов в формате DOCX (.docx) или Markdown (.md).",
   inputSchema: {
     type: Type.OBJECT,
     properties: {
       skillName: { type: Type.STRING, description: "Название навыка (например, 'document-generation')" },
-      prompt: { type: Type.STRING, description: "Подробный запрос или задание для выполнения навыком" }
+      prompt: { type: Type.STRING, description: "Подробный запрос или задание для выполнения навыком" },
+      format: { type: Type.STRING, enum: ["docx", "md"], description: "Формат файла: 'docx' (по умолчанию при запросе docx или word) или 'md'" }
     },
     required: ["skillName", "prompt"]
   },
@@ -109,6 +161,7 @@ export const invokeSkillTool: ToolDefinition = {
     const { ai, generatedArtifacts } = context;
     const skillName = args.skillName?.trim();
     const prompt = args.prompt?.trim();
+    const format = (args.format || "").toLowerCase();
 
     if (!skillName || !prompt) return { success: false, error: "skillName and prompt are required" };
 
@@ -133,7 +186,30 @@ export const invokeSkillTool: ToolDefinition = {
        await context.logAiRun(`skill_${path.basename(skillName)}`, skillResponse);
     }
 
-    const artifactName = `${path.basename(skillName)}_${Date.now()}.md`;
+    const titleMatch = skillContent.match(/^#\s+(.+)$/m);
+    const cleanTitle = titleMatch && titleMatch[1]
+      ? titleMatch[1].replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30)
+      : path.basename(skillName);
+
+    const wantsDocx = format === "docx" || /(\.docx|docx|в docx|в ворд|word)/i.test(prompt);
+
+    if (wantsDocx) {
+      try {
+        const docxBuffer = await markdownToDocx(skillContent, titleMatch?.[1] || "Документ");
+        const artifactName = `${cleanTitle}_${Date.now()}.docx`;
+        generatedArtifacts.push({ name: artifactName, content: docxBuffer });
+
+        return {
+          success: true,
+          message: `Файл ${artifactName} успешно сгенерирован в формате DOCX и отправлен пользователю. Подтверди пользователю, что ты отправил файл именно в формате .docx.`,
+          artifactName
+        };
+      } catch (docxErr: any) {
+        console.warn("[invokeSkillTool] DOCX conversion failed, falling back to markdown:", docxErr);
+      }
+    }
+
+    const artifactName = `${cleanTitle}_${Date.now()}.md`;
     generatedArtifacts.push({ name: artifactName, content: skillContent });
 
     return {

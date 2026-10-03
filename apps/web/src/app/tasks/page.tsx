@@ -220,11 +220,17 @@ export default function TasksPage() {
                 </div>
               </div>
               <button
-                onClick={() => deleteTask(task.id)}
-                className="text-[#666] hover:text-rose-400 p-1 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm(`Удалить задачу «${task.title}»?`)) {
+                    deleteTask(task.id);
+                  }
+                }}
+                className="text-[#888] hover:text-rose-400 active:text-rose-400 p-2.5 rounded-xl hover:bg-rose-500/10 active:bg-rose-500/20 transition-all shrink-0 -mr-1"
                 aria-label="Delete task"
+                title="Удалить задачу"
               >
-                <Trash2 size={16} />
+                <Trash2 size={18} />
               </button>
             </div>
           ))

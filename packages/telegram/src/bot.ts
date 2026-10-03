@@ -9,7 +9,7 @@ export interface MessageHandler {
     userId: string,
     text: string,
     chatId?: string
-  ): Promise<{ text: string; artifacts?: { name: string; content: string }[]; citations?: any[] }>;
+  ): Promise<{ text: string; artifacts?: { name: string; content: string | Buffer }[]; citations?: any[] }>;
 }
 
 export interface SetupBotOptions {
@@ -139,7 +139,8 @@ export function setupBot(
 
       if (artifacts && artifacts.length > 0) {
         for (const art of artifacts) {
-          await ctx.replyWithDocument(new InputFile(Buffer.from(art.content), art.name));
+          const buf = Buffer.isBuffer(art.content) ? art.content : Buffer.from(art.content);
+          await ctx.replyWithDocument(new InputFile(buf, art.name));
         }
       }
     } catch (error) {

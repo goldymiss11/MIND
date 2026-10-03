@@ -22,6 +22,7 @@
     "@mind/db": "*",
     "@mind/memory": "*",
     "@mind/shared": "*",
+    "docx": "^9.8.1",
     "drizzle-orm": "^0.45.3"
   },
   "devDependencies": {
