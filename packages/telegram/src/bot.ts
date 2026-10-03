@@ -1,4 +1,4 @@
-import { Bot, type BotConfig, type Context, InputFile } from "grammy";
+import { Bot, type BotConfig, type Context, InlineKeyboard, InputFile } from "grammy";
 
 /**
  * Interface representing the application service responsible for handling user messages.
@@ -10,6 +10,11 @@ export interface MessageHandler {
     text: string,
     chatId?: string
   ): Promise<{ text: string; artifacts?: { name: string; content: string }[]; citations?: any[] }>;
+}
+
+export interface SetupBotOptions {
+  webAppUrl?: string;
+  config?: BotConfig<Context>;
 }
 
 /**
@@ -70,7 +75,7 @@ export function splitTelegramMessage(text: string, maxLength = 4000): string[] {
 export function setupBot(
   token: string,
   orchestrator: MessageHandler,
-  config?: BotConfig<Context>
+  configOrOptions?: BotConfig<Context> | SetupBotOptions
 ): Bot {
   if (!token) {
     throw new Error("Telegram bot token is required");
@@ -80,14 +85,31 @@ export function setupBot(
     throw new Error("Valid Orchestrator/MessageHandler instance is required for setupBot");
   }
 
+  const options: SetupBotOptions =
+    configOrOptions && ("webAppUrl" in configOrOptions || "config" in configOrOptions)
+      ? (configOrOptions as SetupBotOptions)
+      : { config: configOrOptions as BotConfig<Context> | undefined };
+
+  const webAppUrl = options.webAppUrl;
+  const config = options.config;
+
   const bot = new Bot(token, config);
 
   // Command: /start
   bot.command("start", async (ctx) => {
-    await ctx.reply(
-      "Привет! Я MIND — твоя персональная AI-операционная система.\n\n" +
-        "Напиши мне что-нибудь, и я сохраню это в память."
-    );
+    if (webAppUrl) {
+      const keyboard = new InlineKeyboard().webApp("Открыть MIND", webAppUrl);
+      await ctx.reply(
+        "Привет! Я MIND — твоя персональная AI-операционная система.\n\n" +
+          "Нажми кнопку ниже, чтобы открыть приложение, или напиши мне любое сообщение.",
+        { reply_markup: keyboard }
+      );
+    } else {
+      await ctx.reply(
+        "Привет! Я MIND — твоя персональная AI-операционная система.\n\n" +
+          "Напиши мне что-нибудь, и я сохраню это в память."
+      );
+    }
   });
 
   // Listen to incoming text messages

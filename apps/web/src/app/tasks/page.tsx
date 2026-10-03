@@ -23,8 +23,9 @@ export default function TasksPage() {
   const loadTasks = async () => {
     try {
       setLoading(true);
+      setError(null);
       const result = await fetchWithAuth("/api/miniapp/tasks", initData);
-      setTasks(result.data);
+      setTasks(Array.isArray(result) ? result : (result?.data ?? []));
     } catch (err: any) {
       setError(err.message || "Failed to load tasks");
     } finally {

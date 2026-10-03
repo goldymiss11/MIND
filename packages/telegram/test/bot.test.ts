@@ -148,6 +148,43 @@ test("setupBot: handles /start command", async () => {
   assert.match(outboundCalls[0]?.payload.text, /Привет! Я MIND/);
 });
 
+test("setupBot: handles /start command with webAppUrl and provides inline keyboard", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    webAppUrl: "https://mind-app.local",
+    config: { botInfo: testBotInfo },
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 129 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 20,
+    message: {
+      message_id: 111,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/start",
+      entities: [{ type: "bot_command", offset: 0, length: 6 }],
+    },
+  } as any);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "sendMessage");
+  assert.match(outboundCalls[0]?.payload.text, /Нажми кнопку ниже/);
+  assert.ok(outboundCalls[0]?.payload.reply_markup?.inline_keyboard);
+  const inlineButtons = outboundCalls[0]?.payload.reply_markup.inline_keyboard[0];
+  assert.equal(inlineButtons[0].text, "Открыть MIND");
+  assert.equal(inlineButtons[0].web_app.url, "https://mind-app.local");
+});
+
 test("setupBot: dispatches message:text and sends documents if artifacts are returned", async () => {
   const mockOrchestrator: MessageHandler = {
     handleIncomingMessage: async () => ({

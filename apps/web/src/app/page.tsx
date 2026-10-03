@@ -30,8 +30,9 @@ export default function HomePage() {
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const result = await fetchWithAuth("/api/miniapp/home", initData);
-      setData(result.data);
+      setData(result?.data ?? result);
     } catch (err: any) {
       setError(err.message || "Failed to load data");
     } finally {
