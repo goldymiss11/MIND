@@ -59,11 +59,30 @@ async function start() {
     app.log.warn("TELEGRAM_BOT_TOKEN is not set. Telegram bot will not start.");
   }
 
+  const redisUrl = process.env["REDIS_URL"];
+  let stopWorkerFn: (() => Promise<void>) | null = null;
+
+  if (redisUrl) {
+    try {
+      const { startWorker } = await import("@mind/worker");
+      const workerInstance = await startWorker();
+      stopWorkerFn = workerInstance.close;
+      app.log.info("Proactive background worker started within API process");
+    } catch (err) {
+      app.log.error({ err }, "Failed to initialize embedded proactive worker");
+    }
+  } else {
+    app.log.info("REDIS_URL is not set. Embedded proactive worker will not start.");
+  }
+
   try {
     await app.listen({ port, host });
     app.log.info(`MIND API listening on ${host}:${port}`);
   } catch (err) {
     app.log.error(err);
+    if (stopWorkerFn) {
+      await stopWorkerFn().catch(() => {});
+    }
     if (bot && bot.isInited()) {
       await bot.stop();
     }
@@ -73,6 +92,13 @@ async function start() {
   const closeGracefully = async (signal: string) => {
     isShuttingDown = true;
     app.log.info(`Received ${signal}, shutting down gracefully...`);
+    if (stopWorkerFn) {
+      try {
+        await stopWorkerFn();
+      } catch (err) {
+        app.log.error({ err }, "Error closing embedded worker");
+      }
+    }
     if (bot && bot.isInited()) {
       await bot.stop();
     }
@@ -80,8 +106,8 @@ async function start() {
     process.exit(0);
   };
 
-  process.on("SIGINT", () => closeGracefully("SIGINT"));
-  process.on("SIGTERM", () => closeGracefully("SIGTERM"));
+  process.on("SIGINT", () => void closeGracefully("SIGINT"));
+  process.on("SIGTERM", () => void closeGracefully("SIGTERM"));
 }
 
 void start();
