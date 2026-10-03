@@ -38,16 +38,30 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     tiers: ["embedding"],
     capabilities: { supportsStructuredOutput: false, supportsToolCalling: false, supportsVision: false, supportsEmbeddings: true, supportsGoogleSearch: false }
   },
+  "openai/gpt-oss-20b": {
+    provider: "groq",
+    model: "openai/gpt-oss-20b",
+    pricingClass: "free",
+    tiers: ["simple"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
+  },
+  "openai/gpt-oss-120b": {
+    provider: "groq",
+    model: "openai/gpt-oss-120b",
+    pricingClass: "free",
+    tiers: ["standard", "complex"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
+  },
   "llama-3.1-8b-instant": {
     provider: "groq",
-    model: "llama-3.1-8b-instant",
+    model: "openai/gpt-oss-20b",
     pricingClass: "free",
     tiers: ["simple"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   },
   "llama-3.3-70b-versatile": {
     provider: "groq",
-    model: "llama-3.3-70b-versatile",
+    model: "openai/gpt-oss-120b",
     pricingClass: "free",
     tiers: ["standard", "complex"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
@@ -66,20 +80,6 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     pricingClass: "free",
     contextWindow: 8192,
     tiers: ["standard", "complex"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
-  },
-  "meta-llama/llama-3.3-70b-instruct:free": {
-    provider: "openrouter",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
-    pricingClass: "free",
-    tiers: ["standard", "complex"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
-  },
-  "meta-llama/llama-3.1-8b-instruct:free": {
-    provider: "openrouter",
-    model: "meta-llama/llama-3.1-8b-instruct:free",
-    pricingClass: "free",
-    tiers: ["simple"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   },
   "qwen/qwen3.8-27b:free": {

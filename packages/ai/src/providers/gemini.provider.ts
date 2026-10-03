@@ -108,6 +108,36 @@ export class GeminiProvider implements AIProvider {
         model,
       };
     } catch (error) {
+      if (options?.googleSearch) {
+        console.warn("[GeminiProvider] Google Search grounding failed or quota exhausted. Retrying without search...");
+        const filteredTools = (tools || []).filter((t: any) => !t.googleSearch);
+        const fallbackConfig = { ...config };
+        if (filteredTools.length > 0) {
+          fallbackConfig["tools"] = filteredTools;
+        } else {
+          delete fallbackConfig["tools"];
+        }
+        try {
+          const fallbackRes = await this.client.models.generateContent({
+            model,
+            contents,
+            ...(Object.keys(fallbackConfig).length > 0 ? { config: fallbackConfig } : {}),
+          });
+          const functionCalls = fallbackRes.functionCalls && fallbackRes.functionCalls.length > 0
+            ? fallbackRes.functionCalls.map((fc: any) => ({ name: fc.name || "", args: fc.args || {} }))
+            : undefined;
+
+          return {
+            result: fallbackRes.text ?? "",
+            ...(functionCalls ? { functionCalls } : {}),
+            originalParts: (fallbackRes as any).candidates?.[0]?.content?.parts,
+            usage: this.extractTokenUsage(fallbackRes.usageMetadata),
+            model,
+          };
+        } catch (innerError) {
+          this.mapError(innerError);
+        }
+      }
       this.mapError(error);
     }
   }
