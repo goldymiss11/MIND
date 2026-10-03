@@ -1,5 +1,5 @@
 {
-  "name": "@mind/core",
+  "name": "@mind/memory",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,7 +20,6 @@
   "dependencies": {
     "@mind/ai": "*",
     "@mind/db": "*",
-    "@mind/memory": "*",
     "@mind/shared": "*",
     "drizzle-orm": "^0.45.3"
   },

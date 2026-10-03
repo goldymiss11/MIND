@@ -1,16 +1,17 @@
 
 
 
-import { eq, and, desc, asc, ne, cosineDistance } from "drizzle-orm";
+import { eq, and, desc, ne } from "drizzle-orm";
 import { db as defaultDb, schema, type MindDb } from "@mind/db";
 import { AiService, AiMessage, Type, type TokenUsage } from "@mind/ai";
+import { MemoryService, type ExtractedMemoryItem } from "@mind/memory";
 // @ts-ignore
 import { v4 as uuidv4 } from "uuid";
 import { ExecutionResult, ExecutionPlan } from "../types/execution.js";
 import { toolRegistry } from "../tools/registry.js";
 
 // Basic Types
-export interface ExtractedMemoryItem { type: string; content: string; importance: number; }
+export type { ExtractedMemoryItem };
 export interface ExtractedTaskItem { title: string; description?: string | null; deadline?: string | null; priority?: string; projectName?: string | null; }
 
 export const ANALYZER_SCHEMA = {
@@ -64,26 +65,31 @@ export const EXECUTION_PLAN_SCHEMA = {
 export interface OrchestratorOptions {
   db?: MindDb;
   ai?: AiService;
+  memory?: MemoryService;
 }
 
 export class OrchestratorService {
   private readonly db: MindDb;
   private readonly ai: AiService;
+  private readonly memory: MemoryService;
 
   constructor(options?: OrchestratorOptions | MindDb) {
     if (options && "query" in options) {
       this.db = options;
       this.ai = new AiService();
-    } else if (options && ("db" in options || "ai" in options)) {
+      this.memory = new MemoryService({ db: this.db, ai: this.ai });
+    } else if (options && ("db" in options || "ai" in options || "memory" in options)) {
       this.db = options.db ?? defaultDb;
       this.ai = options.ai ?? new AiService();
+      this.memory = options.memory ?? new MemoryService({ db: this.db, ai: this.ai });
     } else {
       this.db = defaultDb;
       this.ai = new AiService();
+      this.memory = new MemoryService({ db: this.db, ai: this.ai });
     }
   }
 
-  private async logAiRun(userId: string, action: string, aiResponse: { model: string; usage: TokenUsage }): Promise<void> {
+  private async logAiRun(userId: string, action: string, aiResponse: { model: string; usage?: TokenUsage }): Promise<void> {
     await this.db.insert(schema.agentRuns).values({
       userId, action, model: aiResponse.model,
       promptTokens: aiResponse.usage?.promptTokens ?? 0,
@@ -137,32 +143,12 @@ export class OrchestratorService {
     await this.logAiRun(user!.id, "unified_analyzer", analyzerRes);
     const analyzerData = analyzerRes.result;
     
-    // Process Memories with Deduplication
+    // Process Memories with Deduplication via MemoryService
     if (analyzerData?.hasMemory && Array.isArray(analyzerData.memories)) {
-      for (const mem of analyzerData.memories) {
-        if (!mem.content) continue;
-        const embRes = await this.ai.generateEmbedding(mem.content, { tier: "embedding" });
-        await this.logAiRun(user!.id, "memory_embedding", embRes);
-
-        // Deduplication
-        const distanceSql = cosineDistance(schema.memories.embedding, embRes.result);
-        const similarMemories = await this.db.select({ id: schema.memories.id, distance: distanceSql })
-          .from(schema.memories).where(eq(schema.memories.userId, user!.id))
-          .orderBy(asc(distanceSql)).limit(1);
-
-        if (similarMemories.length > 0 && (similarMemories[0]?.distance as number) < 0.15) {
-          await this.db.update(schema.memories).set({ content: mem.content, updatedAt: new Date() })
-            .where(eq(schema.memories.id, similarMemories[0]!.id));
-          updatedMemories.push(similarMemories[0]!.id as string);
-        } else {
-          const inserted = await this.db.insert(schema.memories).values({
-            userId: user!.id, type: mem.type || "semantic", content: mem.content,
-            importance: mem.importance || 1, confidence: 1.0, source: "conversation",
-             embedding: embRes.result,
-          }).returning();
-          updatedMemories.push(inserted[0]!.id as string);
-        }
-      }
+      const savedIds = await this.memory.saveMemories(user!.id, analyzerData.memories, {
+        logAiRun: this.logAiRun.bind(this),
+      });
+      updatedMemories.push(...savedIds);
     }
 
     // Process Tasks
@@ -212,11 +198,9 @@ export class OrchestratorService {
     }
 
     // 5. Context Pack Assembly
-    const queryEmb = await this.ai.generateEmbedding(request.text, { tier: "embedding" });
-    await this.logAiRun(user!.id, "query_embedding", queryEmb);
-
-    const relevantMemories = await this.db.select().from(schema.memories).where(eq(schema.memories.userId, user!.id))
-      .orderBy(asc(cosineDistance(schema.memories.embedding, queryEmb.result))).limit(5);
+    const relevantMemories = await this.memory.retrieveRelevantMemories(user!.id, request.text, 5, {
+      logAiRun: this.logAiRun.bind(this),
+    });
 
     const activeTasksDb = await this.db.select().from(schema.tasks).where(and(eq(schema.tasks.userId, user!.id), ne(schema.tasks.status, "completed"), ne(schema.tasks.status, "cancelled"))).limit(5);
 
