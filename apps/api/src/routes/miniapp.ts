@@ -1,49 +1,20 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { validateWebAppData, parseInitData } from "../lib/auth.js";
-import { db, users, tasks, memories, messages } from "@mind/db";
+import { requireAuth } from "../auth.js";
+import { getOrCreateDbUser } from "./api.js";
+import { db, tasks, memories, messages } from "@mind/db";
 import { eq, desc, and, count, inArray, isNotNull, gt, asc } from "drizzle-orm";
 
 export default async function miniappRoutes(app: FastifyInstance) {
+  // Use centralized HMAC authentication hook
+  app.addHook("preHandler", requireAuth);
   
-  // Middleware for authentication
-  app.decorateRequest("user", null);
-  
-  app.addHook("preHandler", async (request, reply) => {
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("tma ")) {
-      return reply.status(401).send({ error: "Missing or invalid authorization header" });
+  // Resolve internal database user
+  app.addHook("preHandler", async (request) => {
+    if (request.user && typeof request.user.id === "number") {
+      const dbUser = await getOrCreateDbUser(request.user.id);
+      (request as any).dbUser = dbUser;
+      (request as any).user = dbUser;
     }
-    
-    const initData = authHeader.substring(4);
-    const botToken = process.env["TELEGRAM_BOT_TOKEN"];
-    
-    if (!botToken) {
-      request.log.error("TELEGRAM_BOT_TOKEN is not configured");
-      return reply.status(500).send({ error: "Internal server error" });
-    }
-    
-    const isValid = validateWebAppData(initData, botToken);
-    
-    if (!isValid) {
-      return reply.status(403).send({ error: "Invalid Telegram auth data" });
-    }
-    
-    const tgUser = parseInitData(initData);
-    if (!tgUser || !tgUser.id) {
-      return reply.status(403).send({ error: "Missing user data" });
-    }
-    
-    // Find or create user
-    const tgId = Number(tgUser.id);
-    let userList = await db.select().from(users).where(eq(users.telegramId, tgId)).limit(1);
-    
-    let user = userList[0];
-    if (!user) {
-      const inserted = await db.insert(users).values({ telegramId: tgId }).returning();
-      user = inserted[0];
-    }
-    
-    (request as any).user = user;
   });
 
   app.get("/home", async (request: FastifyRequest, reply: FastifyReply) => {

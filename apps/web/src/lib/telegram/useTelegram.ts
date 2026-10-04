@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getTelegramInitData } from '../api/client';
 
 export interface TelegramUser {
   id: number;
@@ -15,6 +16,11 @@ export function useTelegram() {
   const [initData, setInitData] = useState<string>('');
 
   useEffect(() => {
+    const rawInit = getTelegramInitData();
+    if (rawInit) {
+      setInitData(rawInit);
+    }
+
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.ready();
@@ -26,6 +32,8 @@ export function useTelegram() {
       if (tg.initData) {
         setInitData(tg.initData);
       }
+    } else if (rawInit) {
+      setIsReady(true);
     }
   }, []);
 

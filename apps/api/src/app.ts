@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import miniappRoutes from "./routes/miniapp.js";
+import apiRoutes from "./routes/api.js";
 import { pool } from "@mind/db";
 
 /**
@@ -51,6 +52,7 @@ export function buildServer(): FastifyInstance {
     }
   });
 
+  app.register(apiRoutes, { prefix: "/api" });
   app.register(miniappRoutes, { prefix: "/api/miniapp" });
 
   return app;

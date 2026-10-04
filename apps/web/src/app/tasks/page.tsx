@@ -33,7 +33,7 @@ export default function TasksPage() {
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchWithAuth("/api/miniapp/tasks", initData);
+      const result = await fetchWithAuth("/api/tasks?all=true");
       setTasks(Array.isArray(result) ? result : (result?.data ?? []));
     } catch (err: any) {
       setError(err.message || "Failed to load tasks");
@@ -52,7 +52,7 @@ export default function TasksPage() {
     );
 
     try {
-      await fetchWithAuth(`/api/miniapp/tasks/${taskId}`, initData, {
+      await fetchWithAuth(`/api/tasks/${taskId}`, {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
@@ -68,7 +68,7 @@ export default function TasksPage() {
   const deleteTask = async (taskId: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     try {
-      await fetchWithAuth(`/api/miniapp/tasks/${taskId}`, initData, {
+      await fetchWithAuth(`/api/tasks/${taskId}`, {
         method: "DELETE",
       });
     } catch (err: any) {
@@ -83,7 +83,7 @@ export default function TasksPage() {
 
     try {
       setSaving(true);
-      const newTask = await fetchWithAuth("/api/miniapp/tasks", initData, {
+      const newTask = await fetchWithAuth("/api/tasks", {
         method: "POST",
         body: JSON.stringify({
           title: title.trim(),

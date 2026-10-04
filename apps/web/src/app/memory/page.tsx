@@ -31,7 +31,7 @@ export default function MemoryPage() {
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchWithAuth("/api/miniapp/memories", initData);
+      const result = await fetchWithAuth("/api/memories");
       setMemories(Array.isArray(result) ? result : (result?.data ?? []));
     } catch (err: any) {
       setError(err.message || "Failed to load memories");
@@ -46,7 +46,7 @@ export default function MemoryPage() {
 
     try {
       setSaving(true);
-      const newMemory = await fetchWithAuth("/api/miniapp/memories", initData, {
+      const newMemory = await fetchWithAuth("/api/memories", {
         method: "POST",
         body: JSON.stringify({
           content: content.trim(),
@@ -70,7 +70,7 @@ export default function MemoryPage() {
   const deleteMemory = async (memoryId: string) => {
     setMemories((prev) => prev.filter((m) => m.id !== memoryId));
     try {
-      await fetchWithAuth(`/api/miniapp/memories/${memoryId}`, initData, {
+      await fetchWithAuth(`/api/memories/${memoryId}`, {
         method: "DELETE",
       });
     } catch (err: any) {
