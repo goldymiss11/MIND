@@ -42,7 +42,7 @@ export type SpreadsheetData = z.infer<typeof SpreadsheetSchema>;
  * Single slide schema within a presentation.
  */
 export const SlideSchema = z.object({
-  title: z.string().min(1),
+  title: z.string().optional().default("Презентация"),
   bullets: z.array(z.string()).default([]),
   subtitle: z.string().optional(),
   notes: z.string().optional(),
@@ -54,7 +54,7 @@ export type SlideData = z.infer<typeof SlideSchema>;
  * Complete presentation schema for LLM structured output.
  */
 export const PresentationSchema = z.object({
-  title: z.string().min(1),
+  title: z.string().optional().default("Презентация"),
   author: z.string().optional(),
   subtitle: z.string().optional(),
   slides: z.array(SlideSchema).min(1),

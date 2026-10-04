@@ -330,7 +330,7 @@ export const invokeSkillTool: ToolDefinition = {
 
           return {
             success: true,
-            message: `Файл ${artifactName} успешно сгенерирован в формате PPTX и отправлен пользователю. Подтверди пользователю, что ты отправил презентацию в формате .pptx.`,
+            message: `Файл ${artifactName} успешно сгенерирован в формате PPTX и отправлен пользователю. ВАЖНО: Файл УЖЕ прикреплен к твоему ответу платформой. НИКОГДА НЕ ПИШИ ссылки на скачивание (никаких sandbox:/ или markdown-ссылок). Просто скажи текстом, что презентация готова.`,
             artifactName
           };
         } catch (pptxErr: any) {
@@ -370,7 +370,7 @@ export const invokeSkillTool: ToolDefinition = {
 
           return {
             success: true,
-            message: `Файл ${artifactName} успешно сгенерирован в формате XLSX и отправлен пользователю. Подтверди пользователю, что ты отправил файл таблицы в формате .xlsx.`,
+            message: `Файл ${artifactName} успешно сгенерирован в формате XLSX и отправлен пользователю. ВАЖНО: Файл УЖЕ прикреплен к твоему ответу платформой. НИКОГДА НЕ ПИШИ ссылки на скачивание (никаких sandbox:/ или markdown-ссылок). Просто скажи текстом, что таблица готова.`,
             artifactName
           };
         } catch (xlsxErr: any) {
