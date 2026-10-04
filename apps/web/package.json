@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
+    "prebuild": "npm run --workspace=@mind/shared build && npm run --workspace=@mind/db build",
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "next lint",

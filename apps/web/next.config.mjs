@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@mind/shared", "@mind/db"],
+  transpilePackages: ["@mind/shared"],
   experimental: {
-    serverComponentsExternalPackages: ["pg"],
+    serverComponentsExternalPackages: ["pg", "@mind/db"],
   },
 };
 export default nextConfig;
