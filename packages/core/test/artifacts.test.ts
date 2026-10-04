@@ -209,3 +209,135 @@ test("invokeSkillTool: generates binary PPTX artifact when format='pptx' request
   assert.ok(Buffer.isBuffer(artifacts[0]?.content));
   assert.ok(artifacts[0]?.content.length > 2000);
 });
+
+test("invokeSkillTool: definition conforms to strict requirements", () => {
+  const strictPhrase = "MUST use this tool to generate Excel spreadsheets (.xlsx) and PowerPoint presentations (.pptx). Do NOT output markdown tables if the user asks for a table/excel. Do NOT hallucinate download links.";
+  assert.ok(invokeSkillTool.description.includes(strictPhrase));
+
+  const expectedEnum = ["docx", "md", "txt", "pptx", "xlsx"];
+  const formatEnum = invokeSkillTool.inputSchema.properties.format.enum;
+  assert.deepEqual(formatEnum, expectedEnum);
+
+  const extensionEnum = invokeSkillTool.inputSchema.properties.extension.enum;
+  assert.deepEqual(extensionEnum, expectedEnum);
+});
+
+test("invokeSkillTool: handles direct structured arguments for PPTX without calling ai", async () => {
+  const artifacts: any[] = [];
+  let aiCalled = false;
+  const mockContext: any = {
+    ai: {
+      generateText: async () => {
+        aiCalled = true;
+        return { result: "" };
+      }
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Создай презентацию о проекте",
+      format: "pptx",
+      title: "Презентация проекта",
+      slides: [
+        { title: "Слайд 1", bullets: ["Пункт 1", "Пункт 2"] }
+      ]
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(aiCalled, false);
+  assert.equal(artifacts.length, 1);
+  assert.ok(artifacts[0]?.name.endsWith(".pptx"));
+  assert.ok(Buffer.isBuffer(artifacts[0]?.content));
+});
+
+test("invokeSkillTool: handles direct structured arguments for XLSX without calling ai", async () => {
+  const artifacts: any[] = [];
+  let aiCalled = false;
+  const mockContext: any = {
+    ai: {
+      generateText: async () => {
+        aiCalled = true;
+        return { result: "" };
+      }
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Сделай таблицу расходов",
+      format: "xlsx",
+      title: "Расходы",
+      columns: ["Категория", "Сумма"],
+      rows: [["Еда", 1500]]
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(aiCalled, false);
+  assert.equal(artifacts.length, 1);
+  assert.ok(artifacts[0]?.name.endsWith(".xlsx"));
+  assert.ok(Buffer.isBuffer(artifacts[0]?.content));
+});
+
+test("invokeSkillTool: auto-corrects to pptx when format='docx' was mistakenly passed for presentation prompt", async () => {
+  const artifacts: any[] = [];
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({
+        result: JSON.stringify({
+          title: "Презентация",
+          slides: [{ title: "Слайд", bullets: ["А"] }]
+        })
+      })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Сделай презентацию о космосе",
+      format: "docx" // mistakenly passed
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(artifacts.length, 1);
+  assert.ok(artifacts[0]?.name.endsWith(".pptx"));
+  assert.ok(Buffer.isBuffer(artifacts[0]?.content));
+});
+
+test("invokeSkillTool: handles txt format correctly", async () => {
+  const artifacts: any[] = [];
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({ result: "Plain text content" })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Создай текстовый файл со списком",
+      format: "txt"
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(artifacts.length, 1);
+  assert.ok(artifacts[0]?.name.endsWith(".txt"));
+  assert.ok(Buffer.isBuffer(artifacts[0]?.content));
+  assert.equal(artifacts[0]?.content.toString("utf-8"), "Plain text content");
+});
+

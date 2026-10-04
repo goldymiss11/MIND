@@ -11,6 +11,9 @@ export class ToolRegistry {
   }
 
   get(name: string): ToolDefinition | undefined {
+    if (name === "generate_artifact" || name === "create_artifact") {
+      return this.tools.get("invoke_skill") || this.tools.get(name);
+    }
     return this.tools.get(name);
   }
 

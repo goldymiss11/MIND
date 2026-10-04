@@ -576,5 +576,42 @@ test("invokeSkillTool: generates binary DOCX buffer when format='docx' requested
   assert.ok(artifacts[0]?.content.length > 500);
 });
 
+test("OrchestratorService: contains strict artifact routing instructions in system prompt", async () => {
+  let capturedSystemInstruction = "";
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-1", telegramId: 123 }) },
+      conversations: { findFirst: async () => ({ id: "conv-1", userId: "user-1", telegramChatId: "123" }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }), limit: async () => [] }) }) })
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({
+      result: { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] },
+      usage: {}
+    }),
+    generateEmbedding: async () => ({ result: [0.1], usage: {} }),
+    generateText: async (_text: string, options: any) => {
+      capturedSystemInstruction = options?.systemInstruction || "";
+      return { result: "Готово", usage: {} };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  await svc.execute({ telegramUserId: 123, text: "Сделай презентацию о космосе" });
+
+  assert.ok(
+    capturedSystemInstruction.includes(
+      "If the user requests a presentation, you MUST use the artifact generation tool with 'pptx' format. If they request a spreadsheet/table, you MUST use 'xlsx' format."
+    )
+  );
+  assert.ok(capturedSystemInstruction.includes("format='pptx'"));
+  assert.ok(capturedSystemInstruction.includes("format='xlsx'"));
+  assert.ok(capturedSystemInstruction.includes("Do NOT output markdown tables if the user asks for a table/excel"));
+});
+
+
 
 
