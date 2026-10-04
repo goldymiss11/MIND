@@ -7,6 +7,10 @@ import { Home, CheckSquare, Brain, FileText, Settings } from "lucide-react";
 export function Navigation() {
   const pathname = usePathname();
 
+  if (pathname?.startsWith("/admin")) {
+    return null;
+  }
+
   const navItems = [
     { href: "/", label: "Home", icon: Home },
     { href: "/tasks", label: "Tasks", icon: CheckSquare },

@@ -10,6 +10,10 @@ export interface MessageHandler {
     text: string,
     chatId?: string
   ): Promise<{ text: string; artifacts?: { name: string; content: string | Buffer }[]; citations?: any[] }>;
+  ensureUser?(
+    telegramUserId: string | number,
+    source?: string
+  ): Promise<any>;
 }
 
 export interface SetupBotOptions {
@@ -97,6 +101,18 @@ export function setupBot(
 
   // Command: /start
   bot.command("start", async (ctx) => {
+    const fromId = ctx.from?.id;
+    const match = typeof ctx.match === "string" ? ctx.match.trim() : "";
+    const source = match ? match : "organic";
+
+    if (fromId && typeof orchestrator.ensureUser === "function") {
+      try {
+        await orchestrator.ensureUser(fromId, source);
+      } catch (err) {
+        console.error("Error ensuring user on /start:", err);
+      }
+    }
+
     if (webAppUrl) {
       const keyboard = new InlineKeyboard().webApp("Открыть MIND", webAppUrl);
       await ctx.reply(

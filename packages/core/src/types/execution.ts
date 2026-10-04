@@ -30,6 +30,7 @@ export interface ExecutionRequest {
   text: string;
   telegramChatId?: string | number;
   confirmedToolCalls?: string[];
+  source?: string;
 }
 
 export interface ExecutionResult {

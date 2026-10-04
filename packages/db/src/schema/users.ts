@@ -1,4 +1,4 @@
-import { pgTable, uuid, bigint, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, uuid, bigint, timestamp, varchar } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { conversations } from "./conversations.js";
 import { memories } from "./memories.js";
@@ -9,6 +9,7 @@ import { tasks } from "./tasks.js";
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   telegramId: bigint("telegram_id", { mode: "number" }).notNull().unique(),
+  source: varchar("source").default("organic"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

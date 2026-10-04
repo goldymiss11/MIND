@@ -331,4 +331,81 @@ test("setupBot: delivers research grounded response with formatted sources block
   assert.ok(outboundCalls[1]?.payload.text.includes("Источники:"));
 });
 
+test("setupBot: /start command captures referral code via ctx.match", async () => {
+  let capturedUserId = "";
+  let capturedSource = "";
+
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+    ensureUser: async (userId, source) => {
+      capturedUserId = String(userId);
+      capturedSource = String(source);
+    },
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 140 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 7,
+    message: {
+      message_id: 18,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 445566, is_bot: false, first_name: "Founder" },
+      text: "/start founder",
+      entities: [{ type: "bot_command", offset: 0, length: 6 }],
+    },
+  } as any);
+
+  assert.equal(capturedUserId, "445566");
+  assert.equal(capturedSource, "founder");
+  assert.equal(outboundCalls.length, 1);
+  assert.match(outboundCalls[0]?.payload.text, /Привет! Я MIND/);
+});
+
+test("setupBot: /start command defaults to organic if no referral payload", async () => {
+  let capturedUserId = "";
+  let capturedSource = "";
+
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+    ensureUser: async (userId, source) => {
+      capturedUserId = String(userId);
+      capturedSource = String(source);
+    },
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+  });
+
+  bot.api.config.use(async (_prev, method, payload) => {
+    return { ok: true, result: { message_id: 141 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 8,
+    message: {
+      message_id: 19,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 778899, is_bot: false, first_name: "OrganicUser" },
+      text: "/start",
+      entities: [{ type: "bot_command", offset: 0, length: 6 }],
+    },
+  } as any);
+
+  assert.equal(capturedUserId, "778899");
+  assert.equal(capturedSource, "organic");
+});
+
+
 

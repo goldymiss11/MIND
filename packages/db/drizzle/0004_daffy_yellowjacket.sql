@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "source" varchar DEFAULT 'organic';--> statement-breakpoint
+CREATE UNIQUE INDEX "conversations_user_id_chat_id_unique" ON "conversations" USING btree ("user_id","telegram_chat_id");

@@ -141,6 +141,50 @@ export class OrchestratorService {
     return { text: res.response, artifacts: res.artifacts, citations: res.citations };
   }
 
+  /**
+   * Ensures a user exists in the database and updates their acquisition source (e.g. from referral).
+   */
+  async ensureUser(telegramUserId: string | number, source?: string) {
+    const tgUserId = Number(telegramUserId);
+    if (isNaN(tgUserId) || !Number.isSafeInteger(tgUserId)) {
+      throw new Error(`Invalid telegramUserId: ${telegramUserId}`);
+    }
+    const cleanSource = (source && typeof source === "string" && source.trim()) ? source.trim() : "organic";
+
+    let user = await this.db.query.users.findFirst({ where: eq(schema.users.telegramId, tgUserId) });
+    if (!user) {
+      try {
+        const query = this.db.insert(schema.users).values({
+          telegramId: tgUserId,
+          source: cleanSource,
+        });
+        const insertedUser = typeof (query as any).onConflictDoNothing === "function"
+          ? await (query as any).onConflictDoNothing().returning()
+          : await query.returning();
+        user = insertedUser?.[0];
+      } catch {
+        // Handled below if conflict occurred
+      }
+      if (!user) {
+        user = await this.db.query.users.findFirst({ where: eq(schema.users.telegramId, tgUserId) });
+      }
+    } else {
+      const currentSource = user.source;
+      const targetSource = (!currentSource || (cleanSource !== "organic")) ? cleanSource : currentSource;
+      if (currentSource !== targetSource) {
+        try {
+          await this.db.update(schema.users)
+            .set({ source: targetSource, updatedAt: new Date() })
+            .where(eq(schema.users.id, user.id));
+          user.source = targetSource;
+        } catch (err) {
+          console.warn("[OrchestratorService] Failed to update user source:", err);
+        }
+      }
+    }
+    return user;
+  }
+
   async execute(request: ExecutionRequest): Promise<ExecutionResult> {
     const executionId = uuidv4();
     const artifacts: ExecutionArtifact[] = [];
@@ -186,7 +230,13 @@ export class OrchestratorService {
     let user = await this.db.query.users.findFirst({ where: eq(schema.users.telegramId, tgUserId) });
     if (!user) {
       try {
-        const query = this.db.insert(schema.users).values({ telegramId: tgUserId });
+        const userSource = (request.source && typeof request.source === "string" && request.source.trim())
+          ? request.source.trim()
+          : "organic";
+        const query = this.db.insert(schema.users).values({
+          telegramId: tgUserId,
+          source: userSource,
+        });
         const insertedUser = typeof (query as any).onConflictDoNothing === "function"
           ? await (query as any).onConflictDoNothing().returning()
           : await query.returning();
