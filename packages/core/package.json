@@ -23,7 +23,10 @@
     "@mind/memory": "*",
     "@mind/shared": "*",
     "docx": "^9.8.1",
-    "drizzle-orm": "^0.45.3"
+    "drizzle-orm": "^0.45.3",
+    "exceljs": "^4.4.0",
+    "pptxgenjs": "^4.0.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.13.9",

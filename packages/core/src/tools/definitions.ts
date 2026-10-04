@@ -142,16 +142,40 @@ export const deleteTaskTool: ToolDefinition = {
 };
 
 import { markdownToDocx } from "../artifacts/docx.renderer.js";
+import { renderXlsx } from "../artifacts/xlsx-renderer.js";
+import { renderPptx } from "../artifacts/pptx-renderer.js";
+import { SpreadsheetSchema, PresentationSchema } from "../artifacts/schemas.js";
+
+/**
+ * Extracts and parses a JSON object from text that may contain markdown formatting or fences.
+ */
+function extractJsonFromText(raw: string): any {
+  const trimmed = raw.trim();
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  const toParse = codeBlockMatch && codeBlockMatch[1] ? codeBlockMatch[1].trim() : trimmed;
+
+  try {
+    return JSON.parse(toParse);
+  } catch {
+    const firstBrace = toParse.indexOf("{");
+    const lastBrace = toParse.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      return JSON.parse(toParse.slice(firstBrace, lastBrace + 1));
+    }
+    throw new Error(`Не удалось распарсить JSON структуры артефакта`);
+  }
+}
 
 export const invokeSkillTool: ToolDefinition = {
   name: "invoke_skill",
-  description: "Вызывает специализированный навык (agent skill), например 'document-generation' для создания структурированных текстов, лонгридов, статей и документов в формате DOCX (.docx) или Markdown (.md).",
+  description: "Вызывает специализированный навык (agent skill): 'document-generation' для создания документов (.docx, .md), 'presentation-generation' для создания презентаций (.pptx), или 'spreadsheet-generation' для таблиц (.xlsx).",
   inputSchema: {
     type: Type.OBJECT,
     properties: {
-      skillName: { type: Type.STRING, description: "Название навыка (например, 'document-generation')" },
+      skillName: { type: Type.STRING, description: "Название навыка: 'document-generation', 'presentation-generation', 'spreadsheet-generation'" },
       prompt: { type: Type.STRING, description: "Подробный запрос или задание для выполнения навыком" },
-      format: { type: Type.STRING, enum: ["docx", "md"], description: "Формат файла: 'docx' (по умолчанию при запросе docx или word) или 'md'" }
+      format: { type: Type.STRING, enum: ["docx", "xlsx", "pptx", "md"], description: "Формат файла: 'docx' (документы), 'xlsx' (таблицы), 'pptx' (презентации) или 'md'" },
+      content: { type: Type.STRING, description: "Опциональный готовый текст или JSON-контент для артефакта" }
     },
     required: ["skillName", "prompt"]
   },
@@ -161,39 +185,151 @@ export const invokeSkillTool: ToolDefinition = {
     const { ai, generatedArtifacts } = context;
     const skillName = args.skillName?.trim();
     const prompt = args.prompt?.trim();
-    const format = (args.format || "").toLowerCase();
+    const rawFormat = (args.format || "").toLowerCase().trim();
+    const directContent = args.content;
 
     if (!skillName || !prompt) return { success: false, error: "skillName and prompt are required" };
 
+    let format = rawFormat;
+    if (!format) {
+      if (skillName === "presentation-generation" || /(\.pptx|pptx|презентаци|слайд|powerpoint)/i.test(prompt)) {
+        format = "pptx";
+      } else if (skillName === "spreadsheet-generation" || /(\.xlsx|xlsx|таблиц|excel|эксель)/i.test(prompt)) {
+        format = "xlsx";
+      } else if (/(\.docx|docx|в docx|в ворд|word)/i.test(prompt)) {
+        format = "docx";
+      } else {
+        format = "md";
+      }
+    }
+
     const skillPath = resolveSkillPath(skillName);
-    if (!skillPath) return { success: false, error: `Skill '${skillName}' not found` };
+    let skillMdContent = skillPath ? fs.readFileSync(skillPath, "utf-8") : "";
 
-    const skillMdContent = fs.readFileSync(skillPath, "utf-8");
-    const skillResponse = await ai.generateText(prompt, {
-      tier: "complex",
-      systemInstruction: skillMdContent,
-    });
-
-    const skillContent = skillResponse?.result?.trim();
-    if (!skillContent) {
-      return {
-        success: false,
-        error: "Навык вернул пустой результат. Документ не был создан."
-      };
-    }
-    
-    if (context.logAiRun) {
-       await context.logAiRun(`skill_${path.basename(skillName)}`, skillResponse);
+    if (!skillMdContent) {
+      if (format === "xlsx" || skillName === "spreadsheet-generation") {
+        skillMdContent = "Ты эксперт по анализу данных и созданию таблиц. Сформируй валидный JSON структуры SpreadsheetSchema.";
+      } else if (format === "pptx" || skillName === "presentation-generation") {
+        skillMdContent = "Ты эксперт по созданию презентаций. Сформируй валидный JSON структуры PresentationSchema.";
+      } else if (format === "docx" || skillName === "document-generation") {
+        skillMdContent = "Ты эксперт по созданию документов. Сформируй структурированный Markdown.";
+      } else {
+        return { success: false, error: `Skill '${skillName}' not found` };
+      }
     }
 
-    const titleMatch = skillContent.match(/^#\s+(.+)$/m);
+    let skillContent = typeof directContent === "string" ? directContent.trim() : "";
+
+    // Generate content with AI if not already provided
+    if (!skillContent && typeof directContent !== "object") {
+      let systemInstruction = skillMdContent;
+      if (format === "xlsx") {
+        systemInstruction += `\n\nВАЖНО: Верни строго валидный JSON в формате SpreadsheetSchema без markdown-обёртки:
+{
+  "title": "Название таблицы",
+  "sheetName": "Лист 1",
+  "columns": ["Колонка 1", "Колонка 2"],
+  "rows": [
+    ["Значение 1", "Значение 2"]
+  ]
+}`;
+      } else if (format === "pptx") {
+        systemInstruction += `\n\nВАЖНО: Верни строго валидный JSON в формате PresentationSchema без markdown-обёртки:
+{
+  "title": "Название презентации",
+  "author": "MIND",
+  "subtitle": "Подзаголовок",
+  "slides": [
+    {
+      "title": "Заголовок слайда",
+      "bullets": ["Пункт 1", "Пункт 2"],
+      "subtitle": "Подзаголовок слайда"
+    }
+  ]
+}`;
+      }
+
+      const skillResponse = await ai.generateText(prompt, {
+        tier: "complex",
+        systemInstruction,
+      });
+
+      skillContent = skillResponse?.result?.trim();
+      if (!skillContent) {
+        return {
+          success: false,
+          error: "Навык вернул пустой результат. Файл не был создан."
+        };
+      }
+
+      if (context.logAiRun) {
+        await context.logAiRun(`skill_${path.basename(skillName)}`, skillResponse);
+      }
+    }
+
+    // 1. XLSX Spreadsheets
+    if (format === "xlsx") {
+      try {
+        const rawJson = typeof directContent === "object" && directContent !== null
+          ? directContent
+          : extractJsonFromText(skillContent);
+        const validated = SpreadsheetSchema.parse(rawJson);
+        const xlsxBuffer = await renderXlsx(validated);
+        const cleanTitle = (validated.title || validated.sheetName || "таблица")
+          .replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_")
+          .slice(0, 30);
+        const artifactName = `${cleanTitle}_${Date.now()}.xlsx`;
+        generatedArtifacts.push({ name: artifactName, content: xlsxBuffer });
+
+        return {
+          success: true,
+          message: `Файл ${artifactName} успешно сгенерирован в формате XLSX и отправлен пользователю. Подтверди пользователю, что ты отправил файл таблицы в формате .xlsx.`,
+          artifactName
+        };
+      } catch (xlsxErr: any) {
+        console.warn("[invokeSkillTool] XLSX rendering error:", xlsxErr);
+        return {
+          success: false,
+          error: `Ошибка при генерации таблицы XLSX: ${xlsxErr.message}`
+        };
+      }
+    }
+
+    // 2. PPTX Presentations
+    if (format === "pptx") {
+      try {
+        const rawJson = typeof directContent === "object" && directContent !== null
+          ? directContent
+          : extractJsonFromText(skillContent);
+        const validated = PresentationSchema.parse(rawJson);
+        const pptxBuffer = await renderPptx(validated);
+        const cleanTitle = (validated.title || "презентация")
+          .replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_")
+          .slice(0, 30);
+        const artifactName = `${cleanTitle}_${Date.now()}.pptx`;
+        generatedArtifacts.push({ name: artifactName, content: pptxBuffer });
+
+        return {
+          success: true,
+          message: `Файл ${artifactName} успешно сгенерирован в формате PPTX и отправлен пользователю. Подтверди пользователю, что ты отправил презентацию в формате .pptx.`,
+          artifactName
+        };
+      } catch (pptxErr: any) {
+        console.warn("[invokeSkillTool] PPTX rendering error:", pptxErr);
+        return {
+          success: false,
+          error: `Ошибка при генерации презентации PPTX: ${pptxErr.message}`
+        };
+      }
+    }
+
+    // 3. DOCX Documents
+    const titleMatch = typeof skillContent === "string" ? skillContent.match(/^#\s+(.+)$/m) : null;
     const cleanTitle = titleMatch && titleMatch[1]
       ? titleMatch[1].replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30)
       : path.basename(skillName);
 
-    const wantsDocx = format === "docx" || /(\.docx|docx|в docx|в ворд|word)/i.test(prompt);
-
-    if (wantsDocx) {
+    if (format === "docx") {
       try {
         const docxBuffer = await markdownToDocx(skillContent, titleMatch?.[1] || "Документ");
         const artifactName = `${cleanTitle}_${Date.now()}.docx`;
@@ -209,6 +345,7 @@ export const invokeSkillTool: ToolDefinition = {
       }
     }
 
+    // 4. Markdown fallback
     const artifactName = `${cleanTitle}_${Date.now()}.md`;
     generatedArtifacts.push({ name: artifactName, content: skillContent });
 

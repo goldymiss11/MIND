@@ -87,4 +87,8 @@ export interface Task {
 // Application services
 export * from "./types/execution.js";
 export * from "./services/orchestrator.service.js";
+export * from "./artifacts/index.js";
+export * from "./tools/definitions.js";
+export * from "./tools/registry.js";
 export * from "@mind/memory";
+
