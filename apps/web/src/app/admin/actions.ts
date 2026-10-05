@@ -8,6 +8,8 @@ export interface DashboardMetrics {
   totalTasks: number;
   totalArtifacts: number;
   totalActions: number;
+  dbConnected?: boolean;
+  errorMessage?: string;
 }
 
 export interface AudienceStat {
@@ -68,6 +70,18 @@ function formatAction(rawAction: string): { title: string; category: ActivityIte
  * Fetches high-level metrics: Users, Tasks, Generated Artifacts, Total AI Runs
  */
 export async function getMetrics(): Promise<DashboardMetrics> {
+  if (!process.env.DATABASE_URL) {
+    console.error("[getMetrics] DATABASE_URL is not set");
+    return {
+      totalUsers: 0,
+      totalTasks: 0,
+      totalActions: 0,
+      totalArtifacts: 0,
+      dbConnected: false,
+      errorMessage: "Переменная окружения DATABASE_URL не обнаружена. Добавьте её в настройках сервиса Web на Render.",
+    };
+  }
+
   try {
     const [usersResult, tasksResult, actionsResult, artifactsResult] = await Promise.all([
       db.select({ count: sql<number>`count(*)::int` }).from(schema.users),
@@ -92,14 +106,17 @@ export async function getMetrics(): Promise<DashboardMetrics> {
       totalTasks: tasksResult[0]?.count ?? 0,
       totalActions: actionsResult[0]?.count ?? 0,
       totalArtifacts: artifactsResult[0]?.count ?? 0,
+      dbConnected: true,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("[getMetrics] Error fetching dashboard metrics:", error);
     return {
       totalUsers: 0,
       totalTasks: 0,
       totalActions: 0,
       totalArtifacts: 0,
+      dbConnected: false,
+      errorMessage: error?.message || "Ошибка соединения с Postgres базой данных",
     };
   }
 }

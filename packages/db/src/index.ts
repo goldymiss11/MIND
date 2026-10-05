@@ -1,4 +1,31 @@
-import "dotenv/config";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
+
+if (!process.env.DATABASE_URL) {
+  const currentDir =
+    typeof __dirname !== "undefined"
+      ? __dirname
+      : path.dirname(fileURLToPath(import.meta.url));
+
+  const candidatePaths = [
+    process.env["DOTENV_CONFIG_PATH"],
+    path.resolve(process.cwd(), ".env"),
+    path.resolve(process.cwd(), ".env.local"),
+    path.resolve(process.cwd(), "../../.env"),
+    path.resolve(process.cwd(), "../.env"),
+    path.resolve(currentDir, "../../../.env"),
+    path.resolve(currentDir, "../../.env"),
+  ].filter(Boolean) as string[];
+
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      dotenv.config({ path: p });
+      if (process.env.DATABASE_URL) break;
+    }
+  }
+}
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";

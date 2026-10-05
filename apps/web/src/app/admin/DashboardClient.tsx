@@ -18,6 +18,7 @@ import {
   Search,
   ArrowUpRight,
   TrendingUp,
+  AlertTriangle,
 } from "lucide-react";
 import {
   PieChart,
@@ -220,6 +221,21 @@ export function DashboardClient({
             </div>
           </div>
         </header>
+
+        {/* Database Diagnostic Banner */}
+        {metrics.dbConnected === false && (
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 flex items-start gap-3.5 shadow-lg shadow-amber-500/5">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-1.5 text-sm">
+              <div className="font-semibold text-amber-300">База данных не подключена</div>
+              <div className="text-xs text-amber-200/90 leading-relaxed">
+                {metrics.errorMessage || "Не удалось получить данные из Postgres."}
+                <br />
+                Если вы запустили проект на <b>Render</b>, убедитесь, что в настройках Web-сервиса во вкладке <b>Environment</b> добавлена переменная <code>DATABASE_URL</code> (такая же, как у API/сервера).
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 1. TOP METRICS BLOCK */}
         <section className="space-y-3">
