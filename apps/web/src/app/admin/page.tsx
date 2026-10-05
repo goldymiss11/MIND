@@ -1,6 +1,6 @@
 import React from "react";
 import { ShieldAlert, Lock } from "lucide-react";
-import { getMetrics, getAudienceStats, getRecentActivity } from "./actions";
+import { getMetrics, getAudienceStats, getRecentActivity, getAiMetrics } from "./actions";
 import { DashboardClient } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -49,10 +49,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const botUsername = process.env.NEXT_PUBLIC_BOT_USERNAME || "mindopus_bot";
 
   // Real data fetching via @mind/db server actions
-  const [metrics, audienceStats, activities] = await Promise.all([
+  const [metrics, audienceStats, activities, aiData] = await Promise.all([
     getMetrics(),
     getAudienceStats(),
     getRecentActivity(),
+    getAiMetrics(),
   ]);
 
   return (
@@ -60,6 +61,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       initialMetrics={metrics}
       initialAudience={audienceStats}
       initialActivity={activities}
+      initialAiData={aiData}
       botUsername={botUsername}
     />
   );

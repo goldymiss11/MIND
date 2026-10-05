@@ -19,6 +19,7 @@ import {
   ArrowUpRight,
   TrendingUp,
   AlertTriangle,
+  Cpu,
 } from "lucide-react";
 import {
   PieChart,
@@ -28,13 +29,15 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import type { DashboardMetrics, AudienceStat, ActivityItem } from "./actions";
-import { getMetrics, getAudienceStats, getRecentActivity } from "./actions";
+import type { DashboardMetrics, AudienceStat, ActivityItem, AiDashboardData } from "./actions";
+import { getMetrics, getAudienceStats, getRecentActivity, getAiMetrics } from "./actions";
+import { AiModelsTab } from "./AiModelsTab";
 
 interface DashboardClientProps {
   initialMetrics: DashboardMetrics;
   initialAudience: AudienceStat[];
   initialActivity: ActivityItem[];
+  initialAiData: AiDashboardData;
   botUsername?: string;
 }
 
@@ -62,11 +65,14 @@ export function DashboardClient({
   initialMetrics,
   initialAudience,
   initialActivity,
+  initialAiData,
   botUsername = "mindopus_bot",
 }: DashboardClientProps) {
+  const [activeTab, setActiveTab] = useState<"traffic" | "ai">("traffic");
   const [metrics, setMetrics] = useState<DashboardMetrics>(initialMetrics);
   const [audienceStats, setAudienceStats] = useState<AudienceStat[]>(initialAudience);
   const [activities, setActivities] = useState<ActivityItem[]>(initialActivity);
+  const [aiData, setAiData] = useState<AiDashboardData>(initialAiData);
   const [audienceTag, setAudienceTag] = useState<string>("freelance");
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -93,14 +99,16 @@ export function DashboardClient({
   const handleRefresh = () => {
     startTransition(async () => {
       try {
-        const [m, a, act] = await Promise.all([
+        const [m, a, act, ai] = await Promise.all([
           getMetrics(),
           getAudienceStats(),
           getRecentActivity(),
+          getAiMetrics(),
         ]);
         setMetrics(m);
         setAudienceStats(a);
         setActivities(act);
+        setAiData(ai);
         setLastUpdated(new Date().toLocaleTimeString());
       } catch (err) {
         console.error("Failed to refresh dashboard:", err);
@@ -237,13 +245,46 @@ export function DashboardClient({
           </div>
         )}
 
-        {/* 1. TOP METRICS BLOCK */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-              Ключевые показатели
-            </h2>
-          </div>
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-zinc-900/80 border border-zinc-800/80 max-w-fit shadow-lg shadow-black/30">
+          <button
+            onClick={() => setActiveTab("traffic")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === "traffic"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"
+            }`}
+          >
+            <TrendingUp className="w-4 h-4" />
+            <span>Обзор и Трафик</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("ai")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === "ai"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"
+            }`}
+          >
+            <Cpu className="w-4 h-4" />
+            <span>ИИ Модели и Лимиты</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              Live Quotas
+            </span>
+          </button>
+        </div>
+
+        {activeTab === "ai" ? (
+          <AiModelsTab data={aiData} isPending={isPending} onRefresh={handleRefresh} />
+        ) : (
+          <>
+            {/* 1. TOP METRICS BLOCK */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+                  Ключевые показатели
+                </h2>
+              </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Metric 1: Users */}
@@ -734,6 +775,8 @@ export function DashboardClient({
             </table>
           </div>
         </section>
+      </>
+    )}
 
         {/* Footer */}
         <footer className="pt-6 border-t border-zinc-900 text-center text-xs text-zinc-600 flex flex-col sm:flex-row items-center justify-between gap-2">
