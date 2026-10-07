@@ -1,7 +1,7 @@
 "use server";
 
 import { db, schema } from "@mind/db";
-import { desc, eq, sql, or, ilike, gte } from "drizzle-orm";
+import { desc, eq, sql, gte } from "drizzle-orm";
 
 export interface ModelUsageStat {
   model: string;
@@ -134,18 +134,7 @@ export async function getMetrics(): Promise<DashboardMetrics> {
       db.select({ count: sql<number>`count(*)::int` }).from(schema.users),
       db.select({ count: sql<number>`count(*)::int` }).from(schema.tasks),
       db.select({ count: sql<number>`count(*)::int` }).from(schema.agentRuns),
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(schema.agentRuns)
-        .where(
-          or(
-            ilike(schema.agentRuns.action, "skill_%"),
-            ilike(schema.agentRuns.action, "%artifact%"),
-            ilike(schema.agentRuns.action, "%document%"),
-            ilike(schema.agentRuns.action, "%presentation%"),
-            ilike(schema.agentRuns.action, "%spreadsheet%")
-          )
-        ),
+      db.select({ count: sql<number>`count(*)::int` }).from(schema.artifacts),
     ]);
 
     return {

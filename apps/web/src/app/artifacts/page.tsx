@@ -36,7 +36,11 @@ export default function ArtifactsPage() {
   };
 
   const handleDownload = (artifact: any) => {
-    const blob = new Blob([artifact.content || ""], { type: "text/markdown;charset=utf-8" });
+    if (!artifact.content) {
+      alert(`Файл «${artifact.name}» доступен для скачивания в вашем диалоге с Telegram-ботом.`);
+      return;
+    }
+    const blob = new Blob([artifact.content], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -167,7 +171,7 @@ export default function ArtifactsPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto max-h-[50vh] p-3 bg-[#121213] rounded-2xl border border-white/5 text-sm text-[#ddd] font-mono whitespace-pre-wrap leading-relaxed">
-              {selectedArtifact.content || "Empty document"}
+              {selectedArtifact.content || "Бинарный файл (DOCX/PPTX/XLSX) был отправлен вам в Telegram-чат."}
             </div>
 
             <div className="flex gap-2 pt-2">

@@ -47,6 +47,18 @@ export default async function miniappRoutes(app: FastifyInstance) {
       .orderBy(desc(memories.createdAt))
       .limit(5);
       
+    // recent artifacts
+    let recentArtifacts: any[] = [];
+    try {
+      recentArtifacts = await db.select()
+        .from(artifacts)
+        .where(eq(artifacts.userId, user.id))
+        .orderBy(desc(artifacts.createdAt))
+        .limit(3);
+    } catch (artErr) {
+      app.log.warn(artErr, "Failed to load recent artifacts for home");
+    }
+      
     return reply.send({
       tasksCount: activeTasksCount,
       upcomingDeadline: nextDeadlineTask[0]?.deadline?.toISOString() || null,
@@ -56,7 +68,12 @@ export default async function miniappRoutes(app: FastifyInstance) {
         content: m.content,
         createdAt: m.createdAt?.toISOString()
       })),
-      recentArtifacts: [] // TODO: read real artifacts when artifact storage is ready
+      recentArtifacts: recentArtifacts.map(a => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        createdAt: a.createdAt?.toISOString()
+      }))
     });
   });
 
@@ -198,11 +215,31 @@ export default async function miniappRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: "Unauthorized" });
     }
 
-    const userArtifacts = await db.select()
-      .from(artifacts)
-      .where(eq(artifacts.userId, user.id))
-      .orderBy(desc(artifacts.createdAt));
+    try {
+      const userArtifacts = await db.select()
+        .from(artifacts)
+        .where(eq(artifacts.userId, user.id))
+        .orderBy(desc(artifacts.createdAt));
 
-    return reply.send(userArtifacts);
+      return reply.send(userArtifacts || []);
+    } catch (err: any) {
+      app.log.error(err, "Failed to load artifacts for user in miniapp");
+      return reply.status(500).send({ error: "Failed to load artifacts" });
+    }
+  });
+
+  app.delete("/artifacts/:id", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = (request as any).user;
+    const { id } = request.params as any;
+
+    if (!id) return reply.status(400).send({ error: "Artifact ID is required" });
+
+    try {
+      await db.delete(artifacts).where(and(eq(artifacts.id, id), eq(artifacts.userId, user.id)));
+      return reply.send({ success: true });
+    } catch (err: any) {
+      app.log.error(err, "Failed to delete artifact in miniapp");
+      return reply.status(500).send({ error: "Failed to delete artifact" });
+    }
   });
 }

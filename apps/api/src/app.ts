@@ -13,7 +13,7 @@ export function buildServer(): FastifyInstance {
   });
 
   const isProd = process.env.NODE_ENV === "production";
-  const webAppOrigin = process.env.WEB_APP_URL || process.env.WEBAPP_URL;
+  const webAppOrigin = process.env.WEB_APP_URL || process.env.WEBAPP_URL || process.env.MINI_APP_URL;
   
   app.register(cors, {
     origin: (origin, cb) => {
@@ -31,7 +31,15 @@ export function buildServer(): FastifyInstance {
         return;
       }
       try {
-        if (/\.onrender\.com$/.test(new URL(origin).hostname)) {
+        const parsed = new URL(origin);
+        if (
+          parsed.hostname.endsWith(".onrender.com") ||
+          parsed.hostname === "onrender.com" ||
+          parsed.hostname.endsWith(".vercel.app") ||
+          parsed.hostname === "vercel.app" ||
+          parsed.hostname.endsWith(".telegram.org") ||
+          parsed.hostname === "telegram.org"
+        ) {
           cb(null, true);
           return;
         }

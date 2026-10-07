@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { requireAuth } from "../auth.js";
-import { db, users, tasks, memories } from "@mind/db";
+import { db, users, tasks, memories, artifacts } from "@mind/db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 
 /**
@@ -18,16 +18,31 @@ export async function getOrCreateDbUser(telegramId: number): Promise<typeof user
     return existing[0];
   }
 
-  const inserted = await db
-    .insert(users)
-    .values({ telegramId })
-    .returning();
+  try {
+    const inserted = await db
+      .insert(users)
+      .values({ telegramId })
+      .onConflictDoNothing()
+      .returning();
 
-  if (!inserted[0]) {
-    throw new Error(`Failed to resolve or create database user for telegramId ${telegramId}`);
+    if (inserted[0]) {
+      return inserted[0];
+    }
+  } catch {
+    // Conflict on race condition
   }
 
-  return inserted[0];
+  const retry = await db
+    .select()
+    .from(users)
+    .where(eq(users.telegramId, telegramId))
+    .limit(1);
+
+  if (retry[0]) {
+    return retry[0];
+  }
+
+  throw new Error(`Failed to resolve or create database user for telegramId ${telegramId}`);
 }
 
 export default async function apiRoutes(app: FastifyInstance) {
@@ -279,5 +294,65 @@ export default async function apiRoutes(app: FastifyInstance) {
     }
 
     return reply.send({ success: true, deletedId: id });
+  });
+
+  /**
+   * GET /api/artifacts
+   * Returns list of user's generated artifacts.
+   */
+  app.get("/artifacts", async (request: FastifyRequest, reply: FastifyReply) => {
+    const tgUser = request.user;
+    if (!tgUser) {
+      return reply.status(401).send({ error: "Unauthorized" });
+    }
+
+    const dbUser = await getOrCreateDbUser(tgUser.id);
+
+    try {
+      const userArtifacts = await db
+        .select()
+        .from(artifacts)
+        .where(eq(artifacts.userId, dbUser.id))
+        .orderBy(desc(artifacts.createdAt));
+
+      return reply.send(userArtifacts);
+    } catch (err: any) {
+      app.log.error(err, "Failed to load artifacts");
+      return reply.status(500).send({ error: "Failed to load artifacts" });
+    }
+  });
+
+  /**
+   * DELETE /api/artifacts/:id
+   * Deletes an artifact, strictly verifying user ownership.
+   */
+  app.delete("/artifacts/:id", async (request: FastifyRequest, reply: FastifyReply) => {
+    const tgUser = request.user;
+    if (!tgUser) {
+      return reply.status(401).send({ error: "Unauthorized" });
+    }
+
+    const dbUser = await getOrCreateDbUser(tgUser.id);
+    const { id } = request.params as { id: string };
+
+    if (!id) {
+      return reply.status(400).send({ error: "Artifact ID is required" });
+    }
+
+    try {
+      const deleted = await db
+        .delete(artifacts)
+        .where(and(eq(artifacts.id, id), eq(artifacts.userId, dbUser.id)))
+        .returning();
+
+      if (!deleted.length) {
+        return reply.status(404).send({ error: "Artifact not found" });
+      }
+
+      return reply.send({ success: true, deletedId: id });
+    } catch (err: any) {
+      app.log.error(err, "Failed to delete artifact");
+      return reply.status(500).send({ error: "Failed to delete artifact" });
+    }
   });
 }
