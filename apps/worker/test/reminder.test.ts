@@ -243,3 +243,66 @@ test("BullMQ repeatable job registration can be mocked without Redis", async () 
     },
   });
 });
+
+test("scanReminders attaches interactive inline keyboard with done, snz1, and snzd buttons", async () => {
+  const sentPayloads: Array<{ chatId: number | string; text: string; other?: any }> = [];
+
+  const mockTasks = [
+    {
+      id: "987fcdeb-51a2-43f7-9abc-def012345678",
+      title: "Подготовить слайды",
+      deadline: new Date(Date.now() + 1 * 60 * 60 * 1000),
+      userId: "user-123",
+      telegramId: 555666,
+    },
+  ];
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        innerJoin: () => ({
+          where: async () => mockTasks,
+        }),
+      }),
+    }),
+    update: () => ({
+      set: () => ({
+        where: async () => [{ id: "987fcdeb-51a2-43f7-9abc-def012345678" }],
+      }),
+    }),
+  };
+
+  const mockTelegramApi: TelegramSender = {
+    sendMessage: async (chatId, text, other) => {
+      sentPayloads.push({ chatId, text, other });
+      return { ok: true };
+    },
+  };
+
+  const result = await scanReminders(mockDb, mockTelegramApi);
+
+  assert.equal(result.reminded, 1);
+  assert.equal(sentPayloads.length, 1);
+  assert.equal(sentPayloads[0]?.chatId, 555666);
+  assert.ok(sentPayloads[0]?.other?.reply_markup);
+
+  const keyboardRows = sentPayloads[0]?.other?.reply_markup?.inline_keyboard;
+  assert.ok(Array.isArray(keyboardRows));
+  // Flat list of all buttons in the keyboard
+  const buttons = keyboardRows.flat();
+  assert.equal(buttons.length, 3);
+
+  assert.equal(buttons[0]?.text, "✅ Выполнено");
+  assert.equal(buttons[0]?.callback_data, "done:987fcdeb-51a2-43f7-9abc-def012345678");
+
+  assert.equal(buttons[1]?.text, "🔔 +1 час");
+  assert.equal(buttons[1]?.callback_data, "snz1:987fcdeb-51a2-43f7-9abc-def012345678");
+
+  assert.equal(buttons[2]?.text, "🔔 Завтра");
+  assert.equal(buttons[2]?.callback_data, "snzd:987fcdeb-51a2-43f7-9abc-def012345678");
+
+  // Verify byte limit of callback data <= 64 bytes
+  for (const btn of buttons) {
+    assert.ok(Buffer.byteLength(btn.callback_data, "utf8") <= 64);
+  }
+});

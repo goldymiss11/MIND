@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { setupBot, splitTelegramMessage, type MessageHandler } from "../src/bot.js";
+import {
+  setupBot,
+  splitTelegramMessage,
+  registerBotCommands,
+  BOT_COMMANDS,
+  type MessageHandler,
+} from "../src/bot.js";
 import { Bot } from "grammy";
 
 const testBotInfo = {
@@ -407,5 +413,514 @@ test("setupBot: /start command defaults to organic if no referral payload", asyn
   assert.equal(capturedSource, "organic");
 });
 
+test("registerBotCommands: calls setMyCommands with /start, /tasks, and /memory", async () => {
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+  });
 
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: true as any };
+  });
 
+  await registerBotCommands(bot);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "setMyCommands");
+  assert.deepEqual(outboundCalls[0]?.payload.commands, [
+    { command: "start", description: "Запустить/Перезапустить" },
+    { command: "tasks", description: "Мои активные задачи" },
+    { command: "memory", description: "Последние воспоминания" },
+  ]);
+});
+
+test("setupBot: handles /tasks command when user has no active tasks", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: "user-uuid-1", telegramId: 112233 }],
+          orderBy: () => ({
+            limit: async () => [],
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 201 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 101,
+    message: {
+      message_id: 20,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/tasks",
+      entities: [{ type: "bot_command", offset: 0, length: 6 }],
+    },
+  } as any);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "sendMessage");
+  assert.equal(outboundCalls[0]?.payload.text, "У вас нет активных задач.");
+});
+
+test("setupBot: handles /tasks command and formats active tasks list in Markdown", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  const sampleTasks = [
+    {
+      id: "task-uuid-1",
+      userId: "user-uuid-1",
+      title: "Сдать отчет",
+      status: "in_progress",
+      deadline: new Date("2026-10-10T12:00:00Z"),
+      createdAt: new Date("2026-10-01T10:00:00Z"),
+    },
+    {
+      id: "task-uuid-2",
+      userId: "user-uuid-1",
+      title: "Купить билеты",
+      status: "inbox",
+      deadline: null,
+      createdAt: new Date("2026-10-02T10:00:00Z"),
+    },
+  ];
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: "user-uuid-1", telegramId: 112233 }],
+          orderBy: () => ({
+            limit: async () => sampleTasks,
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 202 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 102,
+    message: {
+      message_id: 21,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/tasks",
+      entities: [{ type: "bot_command", offset: 0, length: 6 }],
+    },
+  } as any);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "sendMessage");
+  assert.ok(outboundCalls[0]?.payload.text.includes("Ваши активные задачи"));
+  assert.ok(outboundCalls[0]?.payload.text.includes("Сдать отчет"));
+  assert.ok(outboundCalls[0]?.payload.text.includes("Купить билеты"));
+  assert.equal(outboundCalls[0]?.payload.parse_mode, "Markdown");
+});
+
+test("setupBot: handles /memory command when user has no memories", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: "user-uuid-1", telegramId: 112233 }],
+          orderBy: () => ({
+            limit: async () => [],
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 203 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 103,
+    message: {
+      message_id: 22,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/memory",
+      entities: [{ type: "bot_command", offset: 0, length: 7 }],
+    },
+  } as any);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "sendMessage");
+  assert.equal(outboundCalls[0]?.payload.text, "У вас пока нет сохранённых воспоминаний.");
+});
+
+test("setupBot: handles /memory command and formats recent memories in Markdown", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  const sampleMemories = [
+    {
+      id: "mem-1",
+      userId: "user-uuid-1",
+      content: "Любимый цвет синий",
+      type: "preference",
+      createdAt: new Date("2026-10-05T10:00:00Z"),
+    },
+    {
+      id: "mem-2",
+      userId: "user-uuid-1",
+      content: "Работает над стартапом MIND",
+      type: "project",
+      createdAt: new Date("2026-10-06T10:00:00Z"),
+    },
+  ];
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: "user-uuid-1", telegramId: 112233 }],
+          orderBy: () => ({
+            limit: async () => sampleMemories,
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 204 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 104,
+    message: {
+      message_id: 23,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/memory",
+      entities: [{ type: "bot_command", offset: 0, length: 7 }],
+    },
+  } as any);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "sendMessage");
+  assert.ok(outboundCalls[0]?.payload.text.includes("Последние воспоминания"));
+  assert.ok(outboundCalls[0]?.payload.text.includes("Любимый цвет синий"));
+  assert.ok(outboundCalls[0]?.payload.text.includes("Работает над стартапом MIND"));
+  assert.equal(outboundCalls[0]?.payload.parse_mode, "Markdown");
+});
+
+test("setupBot: handles callback_query done action to mark task completed and edit message", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  let updatedStatus = "";
+  let updatedCompletedAt: any = null;
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => {
+            return [{ id: "task-uuid-abc", userId: "user-uuid-1", telegramId: 112233, title: "Купить хлеб" }];
+          },
+        }),
+      }),
+    }),
+    update: () => ({
+      set: (values: any) => {
+        updatedStatus = values.status;
+        updatedCompletedAt = values.completedAt;
+        return {
+          where: async () => [{ id: "task-uuid-abc" }],
+        };
+      },
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: true as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 105,
+    callback_query: {
+      id: "cb-1",
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      message: {
+        message_id: 55,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        text: "🔔 Напоминание: Приближается дедлайн",
+      },
+      chat_instance: "inst-1",
+      data: "done:task-uuid-abc",
+    },
+  } as any);
+
+  assert.equal(updatedStatus, "completed");
+  assert.ok(updatedCompletedAt instanceof Date);
+
+  const editCall = outboundCalls.find((c) => c.method === "editMessageText");
+  const answerCall = outboundCalls.find((c) => c.method === "answerCallbackQuery");
+
+  assert.ok(editCall, "editMessageText should be called");
+  assert.ok(editCall?.payload.text.includes("Задача выполнена"));
+  assert.ok(answerCall, "answerCallbackQuery should be called");
+});
+
+test("setupBot: handles callback_query snz1 action to postpone task deadline by 1 hour", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  let updatedDeadline: Date | null = null;
+  let updatedLastRemindedAt: any = "not_null";
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: "task-uuid-abc", userId: "user-uuid-1", telegramId: 112233 }],
+        }),
+      }),
+    }),
+    update: () => ({
+      set: (values: any) => {
+        updatedDeadline = values.deadline;
+        updatedLastRemindedAt = values.lastRemindedAt;
+        return {
+          where: async () => [{ id: "task-uuid-abc" }],
+        };
+      },
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: true as any };
+  });
+
+  const beforeTime = Date.now();
+  await bot.handleUpdate({
+    update_id: 106,
+    callback_query: {
+      id: "cb-2",
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      message: {
+        message_id: 56,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        text: "🔔 Напоминание: Приближается дедлайн",
+      },
+      chat_instance: "inst-1",
+      data: "snz1:task-uuid-abc",
+    },
+  } as any);
+
+  assert.ok(updatedDeadline instanceof Date);
+  const diffMs = (updatedDeadline as Date).getTime() - beforeTime;
+  assert.ok(diffMs >= 59 * 60 * 1000 && diffMs <= 61 * 60 * 1000);
+  assert.equal(updatedLastRemindedAt, null);
+
+  const editCall = outboundCalls.find((c) => c.method === "editMessageText");
+  const answerCall = outboundCalls.find((c) => c.method === "answerCallbackQuery");
+  assert.ok(editCall);
+  assert.ok(editCall?.payload.text.includes("Отложено"));
+  assert.ok(answerCall);
+});
+
+test("setupBot: handles callback_query snzd action to postpone task deadline by 24 hours", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  let updatedDeadline: Date | null = null;
+  let updatedLastRemindedAt: any = "not_null";
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: "task-uuid-abc", userId: "user-uuid-1", telegramId: 112233 }],
+        }),
+      }),
+    }),
+    update: () => ({
+      set: (values: any) => {
+        updatedDeadline = values.deadline;
+        updatedLastRemindedAt = values.lastRemindedAt;
+        return {
+          where: async () => [{ id: "task-uuid-abc" }],
+        };
+      },
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: true as any };
+  });
+
+  const beforeTime = Date.now();
+  await bot.handleUpdate({
+    update_id: 107,
+    callback_query: {
+      id: "cb-3",
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      message: {
+        message_id: 57,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        text: "🔔 Напоминание: Приближается дедлайн",
+      },
+      chat_instance: "inst-1",
+      data: "snzd:task-uuid-abc",
+    },
+  } as any);
+
+  assert.ok(updatedDeadline instanceof Date);
+  const diffMs = (updatedDeadline as Date).getTime() - beforeTime;
+  assert.ok(diffMs >= 23 * 60 * 60 * 1000 && diffMs <= 25 * 60 * 60 * 1000);
+  assert.equal(updatedLastRemindedAt, null);
+
+  const editCall = outboundCalls.find((c) => c.method === "editMessageText");
+  const answerCall = outboundCalls.find((c) => c.method === "answerCallbackQuery");
+  assert.ok(editCall);
+  assert.ok(editCall?.payload.text.includes("Отложено"));
+  assert.ok(answerCall);
+});
+
+test("setupBot: rejects callback_query when task is not owned by user", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  let selectCallCount = 0;
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => {
+            selectCallCount++;
+            if (selectCallCount === 1) {
+              return [{ id: "user-uuid-1", telegramId: 112233 }];
+            }
+            return [];
+          },
+        }),
+      }),
+    }),
+    update: () => {
+      throw new Error("Should not update DB when task is not owned by user");
+    },
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: true as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 108,
+    callback_query: {
+      id: "cb-4",
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      message: {
+        message_id: 58,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        text: "🔔 Напоминание",
+      },
+      chat_instance: "inst-1",
+      data: "done:alien-task-id",
+    },
+  } as any);
+
+  const answerCall = outboundCalls.find((c) => c.method === "answerCallbackQuery");
+  assert.ok(answerCall);
+  assert.equal(answerCall?.payload.text, "Задача не найдена");
+  const editCall = outboundCalls.find((c) => c.method === "editMessageText");
+  assert.equal(editCall, undefined);
+});

@@ -22,7 +22,7 @@ dotenv.config({ path: rootEnvPath });
 
 import { buildServer } from "./app.js";
 import { OrchestratorService } from "@mind/core";
-import { setupBot } from "@mind/telegram";
+import { setupBot, registerBotCommands } from "@mind/telegram";
 import type { Bot } from "grammy";
 
 async function start() {
@@ -50,6 +50,12 @@ async function start() {
       .start({
         onStart: async (botInfo) => {
           app.log.info(`Telegram bot started (polling) as @${botInfo.username}`);
+          try {
+            await registerBotCommands(bot!);
+            app.log.info("Telegram bot commands registered successfully (/start, /tasks, /memory)");
+          } catch (cmdErr) {
+            app.log.warn({ err: cmdErr }, "Could not set bot commands in Telegram");
+          }
           if (webAppUrl) {
             try {
               await bot?.api.setChatMenuButton({

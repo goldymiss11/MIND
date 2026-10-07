@@ -1,5 +1,6 @@
 import { eq, and, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, tasks, users, type MindDb } from "@mind/db";
+import { InlineKeyboard } from "grammy";
 
 export interface ReminderJobResult {
   scanned: number;
@@ -10,7 +11,8 @@ export interface ReminderJobResult {
 export interface TelegramSender {
   sendMessage(
     chatId: number | string,
-    text: string
+    text: string,
+    other?: Record<string, unknown>
   ): Promise<unknown>;
 }
 
@@ -67,9 +69,15 @@ export async function scanReminders(
         continue;
       }
 
+      const keyboard = new InlineKeyboard()
+        .text("✅ Выполнено", `done:${task.id}`)
+        .text("🔔 +1 час", `snz1:${task.id}`)
+        .text("🔔 Завтра", `snzd:${task.id}`);
+
       await telegramApi.sendMessage(
         task.telegramId,
-        `🔔 Напоминание: Приближается дедлайн по задаче «${task.title}»`
+        `🔔 Напоминание: Приближается дедлайн по задаче «${task.title}»`,
+        { reply_markup: keyboard }
       );
 
       await database
