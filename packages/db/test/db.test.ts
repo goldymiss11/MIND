@@ -11,6 +11,7 @@ import {
   agentRuns,
   projects,
   tasks,
+  artifacts,
 } from "../src/index.js";
 import { getTableColumns } from "drizzle-orm";
 
@@ -94,5 +95,18 @@ test("@mind/db exports table schemas with required columns", () => {
   assert.ok(taskCols.updatedAt, "tasks.updated_at column should exist");
   assert.ok(taskCols.completedAt, "tasks.completed_at column should exist");
   assert.ok(taskCols.lastRemindedAt, "tasks.last_reminded_at column should exist");
+
+  // Artifacts table
+  const artCols = getTableColumns(artifacts);
+  assert.ok(artCols.id, "artifacts.id column should exist");
+  assert.ok(artCols.userId, "artifacts.user_id column should exist");
+  assert.ok(artCols.conversationId, "artifacts.conversation_id column should exist");
+  assert.ok(artCols.name, "artifacts.name column should exist");
+  assert.ok(artCols.type, "artifacts.type column should exist");
+  assert.ok(artCols.content, "artifacts.content column should exist");
+  assert.ok(artCols.storagePath, "artifacts.storage_path column should exist");
+  assert.ok(artCols.taskId, "artifacts.task_id column should exist");
+  assert.ok(artCols.createdAt, "artifacts.created_at column should exist");
+  assert.ok(artCols.updatedAt, "artifacts.updated_at column should exist");
 });
 

@@ -98,4 +98,7 @@ export type NewProject = InferInsertModel<typeof schema.projects>;
 export type Task = InferSelectModel<typeof schema.tasks>;
 export type NewTask = InferInsertModel<typeof schema.tasks>;
 
+export type Artifact = InferSelectModel<typeof schema.artifacts>;
+export type NewArtifact = InferInsertModel<typeof schema.artifacts>;
+
 

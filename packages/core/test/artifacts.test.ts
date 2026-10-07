@@ -341,3 +341,44 @@ test("invokeSkillTool: handles txt format correctly", async () => {
   assert.equal(artifacts[0]?.content.toString("utf-8"), "Plain text content");
 });
 
+test("invokeSkillTool: persists artifact to database when db and user are provided", async () => {
+  const artifacts: any[] = [];
+  const insertedRows: any[] = [];
+  const mockDb = {
+    insert: (_table: any) => ({
+      values: async (data: any) => {
+        insertedRows.push(data);
+        return [data];
+      }
+    })
+  };
+
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({ result: "# Тестовый документ\n\nСодержимое статьи" })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {},
+    db: mockDb,
+    user: { id: "user-uuid-123" },
+    conversationId: "conv-uuid-456"
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Создай документ с описанием проекта",
+      format: "md"
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(artifacts.length, 1);
+  assert.equal(insertedRows.length, 1);
+  assert.equal(insertedRows[0]?.userId, "user-uuid-123");
+  assert.equal(insertedRows[0]?.conversationId, "conv-uuid-456");
+  assert.equal(insertedRows[0]?.type, "markdown");
+  assert.equal(insertedRows[0]?.content, "# Тестовый документ\n\nСодержимое статьи");
+  assert.ok(insertedRows[0]?.name.endsWith(".md"));
+});
+

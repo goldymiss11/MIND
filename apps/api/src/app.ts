@@ -22,7 +22,7 @@ export function buildServer(): FastifyInstance {
         cb(null, true);
         return;
       }
-      if (!isProd || /^http:\/\/localhost:\d+$/.test(origin) || /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
+      if (!isProd || /^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
         cb(null, true);
         return;
       }
@@ -30,11 +30,15 @@ export function buildServer(): FastifyInstance {
         cb(null, true);
         return;
       }
-      if (/\.onrender\.com$/.test(new URL(origin).hostname)) {
-        cb(null, true);
-        return;
+      try {
+        if (/\.onrender\.com$/.test(new URL(origin).hostname)) {
+          cb(null, true);
+          return;
+        }
+      } catch {
+        // invalid origin url
       }
-      cb(null, true);
+      cb(new Error("Not allowed by CORS"), false);
     },
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],

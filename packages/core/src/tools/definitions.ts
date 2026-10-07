@@ -183,11 +183,29 @@ export const invokeSkillTool: ToolDefinition = {
   sideEffect: "internal_write", // It generates an artifact which is an internal write
   requiresConfirmation: false,
   execute: async (args: any, context: any) => {
-    const { ai, generatedArtifacts } = context;
+    const { ai, generatedArtifacts, db, user } = context;
     const prompt = args.prompt?.trim();
     let skillName = args.skillName?.trim();
     const rawFormat = (args.format || args.extension || "").toLowerCase().trim();
     const directContent = args.content;
+
+    const persistArtifact = async (name: string, type: string, textContent: string | null = null) => {
+      if (db && user?.id) {
+        try {
+          await db.insert(schema.artifacts).values({
+            userId: user.id,
+            conversationId: context.conversationId ?? null,
+            name,
+            type,
+            content: textContent,
+            storagePath: null,
+            taskId: context.taskId ?? null,
+          });
+        } catch (dbErr: any) {
+          console.warn("[invokeSkillTool] Failed to persist artifact to DB:", dbErr);
+        }
+      }
+    };
 
     if (!prompt) return { success: false, error: "prompt is required" };
 
@@ -327,6 +345,7 @@ export const invokeSkillTool: ToolDefinition = {
             .slice(0, 30);
           const artifactName = `${cleanTitle}_${Date.now()}.pptx`;
           generatedArtifacts.push({ name: artifactName, content: pptxBuffer });
+          await persistArtifact(artifactName, "pptx", null);
 
           return {
             success: true,
@@ -367,6 +386,7 @@ export const invokeSkillTool: ToolDefinition = {
             .slice(0, 30);
           const artifactName = `${cleanTitle}_${Date.now()}.xlsx`;
           generatedArtifacts.push({ name: artifactName, content: xlsxBuffer });
+          await persistArtifact(artifactName, "xlsx", null);
 
           return {
             success: true,
@@ -392,6 +412,7 @@ export const invokeSkillTool: ToolDefinition = {
           const docxBuffer = await markdownToDocx(skillContent, titleMatch?.[1] || "Документ");
           const artifactName = `${cleanTitle}_${Date.now()}.docx`;
           generatedArtifacts.push({ name: artifactName, content: docxBuffer });
+          await persistArtifact(artifactName, "docx", null);
 
           return {
             success: true,
@@ -402,6 +423,7 @@ export const invokeSkillTool: ToolDefinition = {
           console.warn("[invokeSkillTool] DOCX conversion failed, falling back to markdown:", docxErr);
           const artifactName = `${cleanTitle}_${Date.now()}.md`;
           generatedArtifacts.push({ name: artifactName, content: skillContent });
+          await persistArtifact(artifactName, "markdown", skillContent);
 
           return {
             success: true,
@@ -420,6 +442,7 @@ export const invokeSkillTool: ToolDefinition = {
         const txtBuffer = Buffer.from(skillContent, "utf-8");
         const artifactName = `${cleanTitle}_${Date.now()}.txt`;
         generatedArtifacts.push({ name: artifactName, content: txtBuffer });
+        await persistArtifact(artifactName, "txt", skillContent);
 
         return {
           success: true,
@@ -437,6 +460,7 @@ export const invokeSkillTool: ToolDefinition = {
 
         const artifactName = `${cleanTitle}_${Date.now()}.md`;
         generatedArtifacts.push({ name: artifactName, content: skillContent });
+        await persistArtifact(artifactName, "markdown", skillContent);
 
         return {
           success: true,

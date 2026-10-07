@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { requireAuth } from "../auth.js";
 import { getOrCreateDbUser } from "./api.js";
-import { db, tasks, memories, messages } from "@mind/db";
+import { db, tasks, memories, artifacts } from "@mind/db";
 import { eq, desc, and, count, inArray, isNotNull, gt, asc } from "drizzle-orm";
 
 export default async function miniappRoutes(app: FastifyInstance) {
@@ -192,41 +192,17 @@ export default async function miniappRoutes(app: FastifyInstance) {
     return reply.send({ success: true });
   });
 
-  app.get("/artifacts", async (_request: FastifyRequest, reply: FastifyReply) => {
-    // Find assistant messages with generated articles or structured long content
-    const assistantMessages = await db.select()
-      .from(messages)
-      .where(eq(messages.role, "assistant"))
-      .orderBy(desc(messages.createdAt))
-      .limit(20);
-
-    const artifactItems: any[] = [];
-    for (const msg of assistantMessages) {
-      const text = msg.content || "";
-      if (text.startsWith("#") || text.includes("Статья") || text.includes("Как работает") || text.length > 500) {
-        const titleMatch = text.match(/^#\s+(.+)$/m);
-        const name = titleMatch && titleMatch[1] ? `${titleMatch[1].slice(0, 40)}.md` : `Document_${msg.id.slice(0, 8)}.md`;
-        artifactItems.push({
-          id: msg.id,
-          name,
-          type: "MARKDOWN",
-          content: text,
-          createdAt: msg.createdAt ? msg.createdAt.toISOString() : new Date().toISOString()
-        });
-      }
+  app.get("/artifacts", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = (request as any).user;
+    if (!user?.id) {
+      return reply.status(401).send({ error: "Unauthorized" });
     }
 
-    // Default item if none generated yet so the section is clear and usable
-    if (artifactItems.length === 0) {
-      artifactItems.push({
-        id: "sample-doc-1",
-        name: "Как работает AI.md",
-        type: "MARKDOWN",
-        content: "# Как работает AI\n\nИскусственный интеллект построен на нейросетевых моделях трансформаторов...",
-        createdAt: new Date().toISOString()
-      });
-    }
+    const userArtifacts = await db.select()
+      .from(artifacts)
+      .where(eq(artifacts.userId, user.id))
+      .orderBy(desc(artifacts.createdAt));
 
-    return reply.send(artifactItems);
+    return reply.send(userArtifacts);
   });
 }
