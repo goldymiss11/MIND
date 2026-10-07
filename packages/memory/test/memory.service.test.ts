@@ -119,7 +119,7 @@ test("MemoryService: saveMemories inserts new record when distance >= 0.15", asy
   assert.ok(inserted);
 });
 
-test("MemoryService: retrieveRelevantMemories retrieves nearest memories", async () => {
+test("MemoryService: retrieveRelevantMemories retrieves nearest memories with pool limit of 15", async () => {
   const mockMemories = [
     { id: "m-1", content: "Fact 1" },
     { id: "m-2", content: "Fact 2" },
@@ -131,7 +131,7 @@ test("MemoryService: retrieveRelevantMemories retrieves nearest memories", async
         where: () => ({
           orderBy: () => ({
             limit: async (n: number) => {
-              assert.equal(n, 5);
+              assert.equal(n, 15);
               return mockMemories;
             },
           }),
@@ -149,6 +149,97 @@ test("MemoryService: retrieveRelevantMemories retrieves nearest memories", async
 
   assert.equal(results.length, 2);
   assert.equal(results[0]?.content, "Fact 1");
+});
+
+test("MemoryService: retrieveRelevantMemories re-ranks candidates by distance, importance, and recency", async () => {
+  const now = Date.now();
+  const mockCandidates = [
+    {
+      id: "mem-a",
+      content: "Low relevance, low importance, old",
+      distance: 0.6,
+      importance: 1,
+      createdAt: new Date(now - 30 * 24 * 60 * 60 * 1000), // > 7 days
+    },
+    {
+      id: "mem-b",
+      content: "Good relevance, low importance, old",
+      distance: 0.2,
+      importance: 1,
+      createdAt: new Date(now - 30 * 24 * 60 * 60 * 1000), // > 7 days
+    },
+    {
+      id: "mem-c",
+      content: "Moderate relevance, high importance, recent",
+      distance: 0.3,
+      importance: 3,
+      createdAt: new Date(now - 2 * 24 * 60 * 60 * 1000), // < 7 days
+    },
+  ];
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async (n: number) => {
+              assert.equal(n, 15);
+              return mockCandidates;
+            },
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const mockAi: any = {
+    generateEmbedding: async () => ({ result: [0.1], usage: {} }),
+  };
+
+  const svc = new MemoryService({ db: mockDb, ai: mockAi });
+  const results = await svc.retrieveRelevantMemories("user-1", "test query");
+
+  // mem-c score: (1 - 0.3)*10 + 3*0.5 + 1.0 = 7.0 + 1.5 + 1.0 = 9.5
+  // mem-b score: (1 - 0.2)*10 + 1*0.5 + 0   = 8.0 + 0.5 + 0   = 8.5
+  // mem-a score: (1 - 0.6)*10 + 1*0.5 + 0   = 4.0 + 0.5 + 0   = 4.5
+  assert.equal(results.length, 3);
+  assert.equal(results[0]?.id, "mem-c");
+  assert.equal(results[1]?.id, "mem-b");
+  assert.equal(results[2]?.id, "mem-a");
+});
+
+test("MemoryService: retrieveRelevantMemories limits returned results to top 5 out of 15 candidates", async () => {
+  const mockCandidates = Array.from({ length: 15 }, (_, i) => ({
+    id: `mem-${i}`,
+    content: `Candidate ${i}`,
+    distance: 0.1 * i,
+    importance: 1,
+    createdAt: new Date(),
+  }));
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async (n: number) => {
+              assert.equal(n, 15);
+              return mockCandidates;
+            },
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const mockAi: any = {
+    generateEmbedding: async () => ({ result: [0.1], usage: {} }),
+  };
+
+  const svc = new MemoryService({ db: mockDb, ai: mockAi });
+  const results = await svc.retrieveRelevantMemories("user-1", "query");
+
+  assert.equal(results.length, 5);
 });
 
 test("MemoryService: assembleContextPack formats text correctly", async () => {

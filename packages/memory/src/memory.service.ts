@@ -225,19 +225,52 @@ export class MemoryService {
       }
 
       const distanceSql = cosineDistance(schema.memories.embedding, queryEmb.result);
-      return await this.db
-        .select()
+      const candidates = await this.db
+        .select({
+          id: schema.memories.id,
+          userId: schema.memories.userId,
+          type: schema.memories.type,
+          content: schema.memories.content,
+          importance: schema.memories.importance,
+          confidence: schema.memories.confidence,
+          source: schema.memories.source,
+          sourceMessageId: schema.memories.sourceMessageId,
+          createdAt: schema.memories.createdAt,
+          updatedAt: schema.memories.updatedAt,
+          expiresAt: schema.memories.expiresAt,
+          embedding: schema.memories.embedding,
+          distance: distanceSql,
+        })
         .from(schema.memories)
         .where(and(eq(schema.memories.userId, userId), notExpiredCondition))
         .orderBy(asc(distanceSql))
-        .limit(limit);
+        .limit(15);
+
+      const now = Date.now();
+      const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+      const scored = candidates.map((m: any) => {
+        const rawDist = m.distance !== undefined && m.distance !== null ? Number(m.distance) : 0;
+        const distance = isNaN(rawDist) ? 0 : rawDist;
+        const importance = typeof m.importance === "number" && !isNaN(m.importance) ? m.importance : 1;
+        const createdAtMs = m.createdAt ? new Date(m.createdAt).getTime() : 0;
+        const isRecent = createdAtMs > 0 && now - createdAtMs <= sevenDaysMs && now - createdAtMs >= 0;
+        const recencyBoost = isRecent ? 1.0 : 0;
+        const score = ((1 - distance) * 10) + (importance * 0.5) + recencyBoost;
+
+        return { memory: m, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+
+      return scored.slice(0, limit).map((s) => s.memory);
     } catch (err) {
       console.warn(`[MemoryService] Vector memory retrieval failed. Falling back to recency-based retrieval:`, err);
       return await this.db
         .select()
         .from(schema.memories)
         .where(and(eq(schema.memories.userId, userId), notExpiredCondition))
-        .orderBy(desc(schema.memories.updatedAt))
+        .orderBy(desc(schema.memories.importance), desc(schema.memories.createdAt))
         .limit(limit);
     }
   }

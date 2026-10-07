@@ -1,6 +1,6 @@
 import { Bot, type BotConfig, type Context, InlineKeyboard, InputFile, type Api } from "grammy";
 import { db, tasks, users, memories, type MindDb } from "@mind/db";
-import { eq, and, inArray, desc, asc } from "drizzle-orm";
+import { eq, and, inArray, desc, asc, count } from "drizzle-orm";
 
 export const BOT_COMMANDS = [
   { command: "start", description: "Запустить/Перезапустить" },
@@ -139,12 +139,52 @@ export function setupBot(
     const match = typeof ctx.match === "string" ? ctx.match.trim() : "";
     const source = match ? match : "organic";
 
+    let user: any = null;
     if (fromId && typeof orchestrator.ensureUser === "function") {
       try {
-        await orchestrator.ensureUser(fromId, source);
+        user = await orchestrator.ensureUser(fromId, source);
       } catch (err) {
         console.error("Error ensuring user on /start:", err);
       }
+    }
+
+    if (!user && fromId) {
+      try {
+        const userRecords = await database
+          .select()
+          .from(users)
+          .where(eq(users.telegramId, fromId))
+          .limit(1);
+        user = userRecords[0];
+      } catch {
+        // Fallback if db select is unavailable
+      }
+    }
+
+    let memoryCount = -1;
+    if (user?.id) {
+      try {
+        const memCount = await database
+          .select({ count: count() })
+          .from(memories)
+          .where(eq(memories.userId, user.id));
+        memoryCount = Number(memCount[0]?.count ?? 0);
+      } catch (err) {
+        console.error("Error querying memory count on /start:", err);
+      }
+    }
+
+    if (memoryCount === 0) {
+      const onboardingText =
+        "Привет! Я MIND — твоя персональная AI-операционная система.\n\n" +
+        "У меня пока нет информации о тебе. Расскажи, чем ты занимаешься, над какими проектами работаешь или какие у тебя главные цели на этот год? Я сохраню это в память, чтобы лучше понимать твой контекст.";
+      if (webAppUrl) {
+        const keyboard = new InlineKeyboard().webApp("Открыть MIND", webAppUrl);
+        await ctx.reply(onboardingText, { reply_markup: keyboard });
+      } else {
+        await ctx.reply(onboardingText);
+      }
+      return;
     }
 
     if (webAppUrl) {
@@ -401,6 +441,95 @@ export function setupBot(
       } catch {
         // Ignore
       }
+    }
+  });
+
+  // Listen to incoming voice messages
+  bot.on("message:voice", async (ctx) => {
+    const fromId = ctx.from?.id;
+    const chatId = ctx.chat?.id;
+    const voice = ctx.message.voice;
+
+    if (!fromId || !voice) {
+      return;
+    }
+
+    try {
+      await ctx.replyWithChatAction("typing");
+
+      const file = await ctx.getFile();
+      if (!file.file_path) {
+        throw new Error("Telegram did not provide a file_path for voice message");
+      }
+
+      const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
+      const audioResponse = await fetch(fileUrl);
+      if (!audioResponse.ok) {
+        throw new Error(`Failed to download voice file from Telegram: ${audioResponse.statusText}`);
+      }
+
+      const audioBlob = await audioResponse.blob();
+
+      const groqApiKey = process.env.GROQ_API_KEY;
+      if (!groqApiKey) {
+        throw new Error("GROQ_API_KEY is not configured");
+      }
+
+      const formData = new FormData();
+      formData.append("file", audioBlob, "audio.ogg");
+      formData.append("model", "whisper-large-v3");
+      formData.append("response_format", "json");
+
+      const transcriptionResponse = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${groqApiKey}`,
+        },
+        body: formData,
+      });
+
+      if (!transcriptionResponse.ok) {
+        const errorText = await transcriptionResponse.text().catch(() => "");
+        throw new Error(`Groq Whisper transcription failed (${transcriptionResponse.status}): ${errorText}`);
+      }
+
+      const transcriptionData = (await transcriptionResponse.json()) as { text?: string };
+      const transcribedText = transcriptionData.text?.trim();
+
+      if (!transcribedText) {
+        await ctx.reply("Не удалось распознать голосовое сообщение. Попробуйте записать ещё раз.");
+        return;
+      }
+
+      try {
+        await ctx.reply(`🎤 _Распознано:_\n\n${transcribedText}`, { parse_mode: "Markdown" });
+      } catch {
+        await ctx.reply(`🎤 Распознано:\n\n${transcribedText}`);
+      }
+
+      await ctx.replyWithChatAction("typing");
+
+      const { text: responseText, artifacts } = await orchestrator.handleIncomingMessage(
+        String(fromId),
+        transcribedText,
+        chatId !== undefined ? String(chatId) : undefined
+      );
+
+      const messageContent = responseText?.trim() || "Готово";
+      const chunks = splitTelegramMessage(messageContent, 4000);
+      for (const chunk of chunks) {
+        await ctx.reply(chunk);
+      }
+
+      if (artifacts && artifacts.length > 0) {
+        for (const art of artifacts) {
+          const buf = Buffer.isBuffer(art.content) ? art.content : Buffer.from(art.content);
+          await ctx.replyWithDocument(new InputFile(buf, art.name));
+        }
+      }
+    } catch (error) {
+      console.error("Error processing Telegram voice message:", error);
+      await ctx.reply("Произошла ошибка при обработке голосового сообщения. Попробуйте позже.");
     }
   });
 

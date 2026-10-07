@@ -924,3 +924,243 @@ test("setupBot: rejects callback_query when task is not owned by user", async ()
   const editCall = outboundCalls.find((c) => c.method === "editMessageText");
   assert.equal(editCall, undefined);
 });
+
+test("setupBot: /start sends tailored onboarding message when user has zero memories", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+    ensureUser: async () => ({ id: "user-new-id" }),
+  };
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: async () => [{ count: 0 }],
+      }),
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 301 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 109,
+    message: {
+      message_id: 60,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/start",
+      entities: [{ type: "bot_command", offset: 0, length: 6 }],
+    },
+  } as any);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "sendMessage");
+  assert.ok(
+    outboundCalls[0]?.payload.text.includes(
+      "У меня пока нет информации о тебе. Расскажи, чем ты занимаешься"
+    )
+  );
+});
+
+test("setupBot: /start sends existing greeting when user has memories", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+    ensureUser: async () => ({ id: "user-existing-id" }),
+  };
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: async () => [{ count: 3 }],
+      }),
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 302 } as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 110,
+    message: {
+      message_id: 61,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/start",
+      entities: [{ type: "bot_command", offset: 0, length: 6 }],
+    },
+  } as any);
+
+  assert.equal(outboundCalls.length, 1);
+  assert.equal(outboundCalls[0]?.method, "sendMessage");
+  assert.match(outboundCalls[0]?.payload.text, /Напиши мне что-нибудь, и я сохраню это в память/);
+});
+
+test("setupBot: handles incoming voice message with Groq Whisper transcription and dispatches to orchestrator", async () => {
+  let calledUser = "";
+  let calledText = "";
+  const originalGroqKey = process.env.GROQ_API_KEY;
+  process.env.GROQ_API_KEY = "test-groq-key";
+
+  const originalFetch = globalThis.fetch;
+  let voiceFileDownloaded = false;
+  let groqCalledWithFormData = false;
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const urlStr = String(input);
+    if (urlStr.includes("api.telegram.org/file/bot")) {
+      voiceFileDownloaded = true;
+      return new Response(new Blob(["fake audio ogg content"], { type: "audio/ogg" }), {
+        status: 200,
+        statusText: "OK",
+      });
+    }
+
+    if (urlStr.includes("api.groq.com/openai/v1/audio/transcriptions")) {
+      groqCalledWithFormData = init?.body instanceof FormData;
+      assert.equal(init?.headers && (init.headers as any)["Authorization"], "Bearer test-groq-key");
+      return new Response(JSON.stringify({ text: "Купи молоко сегодня вечером" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return originalFetch(input, init);
+  };
+
+  try {
+    const mockOrchestrator: MessageHandler = {
+      handleIncomingMessage: async (userId, text) => {
+        calledUser = String(userId);
+        calledText = text;
+        return {
+          text: "Задача создана: купить молоко",
+          artifacts: [{ name: "task.txt", content: "Купить молоко" }],
+        };
+      },
+    };
+
+    const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+      botInfo: testBotInfo,
+    });
+
+    const outboundCalls: Array<{ method: string; payload: any }> = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === "getFile") {
+        return { ok: true, result: { file_id: "voice-123", file_path: "voice/file_0.oga" } as any };
+      }
+      outboundCalls.push({ method, payload });
+      return { ok: true, result: { message_id: 303 } as any };
+    });
+
+    await bot.handleUpdate({
+      update_id: 111,
+      message: {
+        message_id: 62,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        from: { id: 112233, is_bot: false, first_name: "Alex" },
+        voice: {
+          file_id: "voice-123",
+          file_unique_id: "uniq-123",
+          duration: 3,
+          mime_type: "audio/ogg",
+          file_size: 1024,
+        },
+      },
+    } as any);
+
+    assert.ok(voiceFileDownloaded, "Telegram audio should be downloaded");
+    assert.ok(groqCalledWithFormData, "Groq should be called with FormData");
+    assert.equal(calledUser, "112233");
+    assert.equal(calledText, "Купи молоко сегодня вечером");
+
+    // Outbound calls: typing, confirmation reply, typing, ai reply, artifact document
+    const messages = outboundCalls.filter((c) => c.method === "sendMessage");
+    assert.ok(messages.length >= 2);
+    assert.ok(messages[0]?.payload.text.includes("🎤 _Распознано:_\n\nКупи молоко сегодня вечером"));
+    assert.ok(messages[1]?.payload.text.includes("Задача создана: купить молоко"));
+
+    const documents = outboundCalls.filter((c) => c.method === "sendDocument");
+    assert.equal(documents.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.GROQ_API_KEY = originalGroqKey;
+  }
+});
+
+test("setupBot: handles voice transcription failure gracefully", async () => {
+  const originalGroqKey = process.env.GROQ_API_KEY;
+  process.env.GROQ_API_KEY = "test-groq-key";
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const urlStr = String(input);
+    if (urlStr.includes("api.telegram.org/file/bot")) {
+      return new Response(new Blob(["audio content"]), { status: 200 });
+    }
+    if (urlStr.includes("api.groq.com/openai/v1/audio/transcriptions")) {
+      return new Response("Internal Server Error", { status: 500 });
+    }
+    return originalFetch(input, init);
+  };
+
+  try {
+    const mockOrchestrator: MessageHandler = {
+      handleIncomingMessage: async () => ({ text: "ok" }),
+    };
+
+    const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+      botInfo: testBotInfo,
+    });
+
+    const outboundCalls: Array<{ method: string; payload: any }> = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === "getFile") {
+        return { ok: true, result: { file_id: "voice-123", file_path: "voice/file_0.oga" } as any };
+      }
+      outboundCalls.push({ method, payload });
+      return { ok: true, result: { message_id: 304 } as any };
+    });
+
+    await bot.handleUpdate({
+      update_id: 112,
+      message: {
+        message_id: 63,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        from: { id: 112233, is_bot: false, first_name: "Alex" },
+        voice: {
+          file_id: "voice-123",
+          file_unique_id: "uniq-123",
+          duration: 3,
+        },
+      },
+    } as any);
+
+    const errorMessage = outboundCalls.find(
+      (c) => c.method === "sendMessage" && c.payload.text.includes("Произошла ошибка при обработке голосового сообщения")
+    );
+    assert.ok(errorMessage, "User should receive friendly error message");
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.GROQ_API_KEY = originalGroqKey;
+  }
+});
