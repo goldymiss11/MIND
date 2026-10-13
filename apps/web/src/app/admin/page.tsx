@@ -63,6 +63,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       initialActivity={activities}
       initialAiData={aiData}
       botUsername={botUsername}
+      adminSecret={userSecret}
     />
   );
 }

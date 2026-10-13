@@ -569,3 +569,137 @@ export async function getAiMetrics(): Promise<AiDashboardData> {
   }
 }
 
+/**
+ * Sends a broadcast message to all registered Telegram users.
+ * Respects Telegram rate limits (~25-30 msgs/sec), falls back to plain text
+ * if Markdown fails, and catches individual delivery failures gracefully.
+ */
+export async function sendBroadcast(
+  messageText: string,
+  secret?: string
+): Promise<{ success: boolean; sent: number; failed: number; total: number; error?: string }> {
+  const adminSecret = process.env.ADMIN_SECRET || "founder_super_secret_2026";
+  if (!secret || secret !== adminSecret) {
+    return { success: false, sent: 0, failed: 0, total: 0, error: "Unauthorized" };
+  }
+
+  const trimmedText = messageText?.trim();
+  if (!trimmedText) {
+    return { success: false, sent: 0, failed: 0, total: 0, error: "Текст сообщения не может быть пустым" };
+  }
+
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) {
+    return {
+      success: false,
+      sent: 0,
+      failed: 0,
+      total: 0,
+      error: "TELEGRAM_BOT_TOKEN не задан в переменных окружения",
+    };
+  }
+
+  let recipients: number[] = [];
+  try {
+    const userRows = await db
+      .select({ telegramId: schema.users.telegramId })
+      .from(schema.users);
+
+    const validIds = userRows
+      .map((u) => u.telegramId)
+      .filter((id): id is number => typeof id === "number" && !isNaN(id) && id > 0);
+
+    recipients = Array.from(new Set(validIds));
+  } catch (dbErr: any) {
+    console.error("[sendBroadcast] DB query failed:", dbErr);
+    return {
+      success: false,
+      sent: 0,
+      failed: 0,
+      total: 0,
+      error: dbErr?.message || "Не удалось получить список пользователей из базы данных",
+    };
+  }
+
+  if (recipients.length === 0) {
+    return { success: true, sent: 0, failed: 0, total: 0 };
+  }
+
+  let sent = 0;
+  let failed = 0;
+
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  for (const telegramId of recipients) {
+    try {
+      let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: telegramId,
+          text: trimmedText,
+          parse_mode: "Markdown",
+        }),
+      });
+
+      let resData: any = await res.json().catch(() => null);
+
+      // Handle Telegram rate limiting 429
+      if (res.status === 429) {
+        const retryAfterSeconds = (resData?.parameters?.retry_after as number) || 1;
+        await delay(retryAfterSeconds * 1000 + 100);
+        res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: telegramId,
+            text: trimmedText,
+            parse_mode: "Markdown",
+          }),
+        });
+        resData = await res.json().catch(() => null);
+      }
+
+      // Fallback to plain text if Markdown parsing fails
+      if (
+        !res.ok &&
+        resData?.description &&
+        /can't parse entities|entity/i.test(resData.description)
+      ) {
+        res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: telegramId,
+            text: trimmedText,
+          }),
+        });
+        resData = await res.json().catch(() => null);
+      }
+
+      if (res.ok && resData?.ok) {
+        sent++;
+      } else {
+        console.warn(
+          `[sendBroadcast] Delivery failed for user ${telegramId}:`,
+          resData?.description || res.statusText
+        );
+        failed++;
+      }
+    } catch (sendErr) {
+      console.error(`[sendBroadcast] Exception sending to user ${telegramId}:`, sendErr);
+      failed++;
+    }
+
+    // 40ms delay between sends to stay safely under Telegram's 30 msgs/sec global limit
+    await delay(40);
+  }
+
+  return {
+    success: true,
+    sent,
+    failed,
+    total: recipients.length,
+  };
+}
+

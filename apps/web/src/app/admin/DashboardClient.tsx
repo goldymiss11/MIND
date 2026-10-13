@@ -20,6 +20,7 @@ import {
   TrendingUp,
   AlertTriangle,
   Cpu,
+  Send,
 } from "lucide-react";
 import {
   PieChart,
@@ -32,6 +33,7 @@ import {
 import type { DashboardMetrics, AudienceStat, ActivityItem, AiDashboardData } from "./actions";
 import { getMetrics, getAudienceStats, getRecentActivity, getAiMetrics } from "./actions";
 import { AiModelsTab } from "./AiModelsTab";
+import { BroadcastTab } from "./BroadcastTab";
 
 interface DashboardClientProps {
   initialMetrics: DashboardMetrics;
@@ -39,6 +41,7 @@ interface DashboardClientProps {
   initialActivity: ActivityItem[];
   initialAiData: AiDashboardData;
   botUsername?: string;
+  adminSecret?: string;
 }
 
 const COLORS = [
@@ -67,8 +70,9 @@ export function DashboardClient({
   initialActivity,
   initialAiData,
   botUsername = "mindopus_bot",
+  adminSecret,
 }: DashboardClientProps) {
-  const [activeTab, setActiveTab] = useState<"traffic" | "ai">("traffic");
+  const [activeTab, setActiveTab] = useState<"traffic" | "ai" | "broadcast">("traffic");
   const [metrics, setMetrics] = useState<DashboardMetrics>(initialMetrics);
   const [audienceStats, setAudienceStats] = useState<AudienceStat[]>(initialAudience);
   const [activities, setActivities] = useState<ActivityItem[]>(initialActivity);
@@ -272,10 +276,26 @@ export function DashboardClient({
               Live Quotas
             </span>
           </button>
+          <button
+            onClick={() => setActiveTab("broadcast")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === "broadcast"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"
+            }`}
+          >
+            <Send className="w-4 h-4" />
+            <span>Рассылка</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+              Bot Broadcast
+            </span>
+          </button>
         </div>
 
         {activeTab === "ai" ? (
           <AiModelsTab data={aiData} isPending={isPending} onRefresh={handleRefresh} />
+        ) : activeTab === "broadcast" ? (
+          <BroadcastTab totalUsers={metrics.totalUsers} adminSecret={adminSecret} />
         ) : (
           <>
             {/* 1. TOP METRICS BLOCK */}
