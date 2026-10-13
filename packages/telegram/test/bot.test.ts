@@ -1164,3 +1164,177 @@ test("setupBot: handles voice transcription failure gracefully", async () => {
     process.env.GROQ_API_KEY = originalGroqKey;
   }
 });
+
+test("setupBot: handles incoming photo message, downloads file, converts to base64, and dispatches to orchestrator", async () => {
+  const originalFetch = globalThis.fetch;
+  const mockImageBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+  let capturedOptions: any = null;
+  let capturedCaption: string = "";
+
+  try {
+    globalThis.fetch = async (url: any) => {
+      if (String(url).includes("telegram.org/file/bot")) {
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => mockImageBytes.buffer.slice(mockImageBytes.byteOffset, mockImageBytes.byteOffset + mockImageBytes.byteLength),
+        } as any;
+      }
+      return { ok: false, status: 404 } as any;
+    };
+
+    const mockOrchestrator: MessageHandler = {
+      handleIncomingMessage: async (_userId, text, _chatId, options) => {
+        capturedCaption = text;
+        capturedOptions = options;
+        return { text: "На фотографии виден график роста пользователей." };
+      },
+    };
+
+    const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+      botInfo: testBotInfo,
+    });
+
+    const outboundCalls: Array<{ method: string; payload: any }> = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === "getFile") {
+        return { ok: true, result: { file_id: "photo-high", file_path: "photos/photo_1.jpg" } as any };
+      }
+      outboundCalls.push({ method, payload });
+      return { ok: true, result: { message_id: 401 } as any };
+    });
+
+    await bot.handleUpdate({
+      update_id: 113,
+      message: {
+        message_id: 70,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        from: { id: 112233, is_bot: false, first_name: "Alex" },
+        photo: [
+          { file_id: "photo-low", file_unique_id: "u-1", width: 100, height: 100 },
+          { file_id: "photo-high", file_unique_id: "u-2", width: 800, height: 800 },
+        ],
+        caption: "Посмотри на этот график",
+      },
+    } as any);
+
+    assert.equal(capturedCaption, "Посмотри на этот график");
+    assert.ok(capturedOptions);
+    assert.equal(capturedOptions.imageBase64, mockImageBytes.toString("base64"));
+    assert.equal(capturedOptions.mimeType, "image/jpeg");
+
+    const typingAction = outboundCalls.find(
+      (c) => c.method === "sendChatAction" && c.payload.action === "typing"
+    );
+    assert.ok(typingAction, "Should send typing chat action");
+
+    const replyMsg = outboundCalls.find(
+      (c) => c.method === "sendMessage" && c.payload.text === "На фотографии виден график роста пользователей."
+    );
+    assert.ok(replyMsg, "Should reply with orchestrator text response");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("setupBot: photo message without caption uses default prompt", async () => {
+  const originalFetch = globalThis.fetch;
+  const mockImageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  let capturedCaption = "";
+  let capturedMime = "";
+
+  try {
+    globalThis.fetch = async (url: any) => {
+      if (String(url).includes("telegram.org/file/bot")) {
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => mockImageBytes.buffer.slice(mockImageBytes.byteOffset, mockImageBytes.byteOffset + mockImageBytes.byteLength),
+        } as any;
+      }
+      return { ok: false, status: 404 } as any;
+    };
+
+    const mockOrchestrator: MessageHandler = {
+      handleIncomingMessage: async (_userId, text, _chatId, options) => {
+        capturedCaption = text;
+        capturedMime = options?.mimeType || "";
+        return { text: "Фотография проанализирована." };
+      },
+    };
+
+    const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+      botInfo: testBotInfo,
+    });
+
+    bot.api.config.use(async (_prev, method) => {
+      if (method === "getFile") {
+        return { ok: true, result: { file_id: "photo-png", file_path: "photos/image.png" } as any };
+      }
+      return { ok: true, result: { message_id: 402 } as any };
+    });
+
+    await bot.handleUpdate({
+      update_id: 114,
+      message: {
+        message_id: 71,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        from: { id: 112233, is_bot: false, first_name: "Alex" },
+        photo: [{ file_id: "photo-png", file_unique_id: "u-3", width: 500, height: 500 }],
+      },
+    } as any);
+
+    assert.equal(capturedCaption, "Что изображено на этом фото? Проанализируй и помоги мне.");
+    assert.equal(capturedMime, "image/png");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("setupBot: handles photo download failure gracefully without crashing", async () => {
+  const originalFetch = globalThis.fetch;
+
+  try {
+    globalThis.fetch = async () => {
+      return { ok: false, status: 500, statusText: "Internal Server Error" } as any;
+    };
+
+    const mockOrchestrator: MessageHandler = {
+      handleIncomingMessage: async () => ({ text: "ok" }),
+    };
+
+    const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+      botInfo: testBotInfo,
+    });
+
+    const outboundCalls: Array<{ method: string; payload: any }> = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === "getFile") {
+        return { ok: true, result: { file_id: "p-fail", file_path: "photos/fail.jpg" } as any };
+      }
+      outboundCalls.push({ method, payload });
+      return { ok: true, result: { message_id: 403 } as any };
+    });
+
+    await bot.handleUpdate({
+      update_id: 115,
+      message: {
+        message_id: 72,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        from: { id: 112233, is_bot: false, first_name: "Alex" },
+        photo: [{ file_id: "p-fail", file_unique_id: "u-f", width: 100, height: 100 }],
+      },
+    } as any);
+
+    const errorMsg = outboundCalls.find(
+      (c) => c.method === "sendMessage" && c.payload.text.includes("Произошла ошибка при обработке фотографии")
+    );
+    assert.ok(errorMsg, "User should receive friendly error message on photo failure");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+

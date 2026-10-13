@@ -77,6 +77,7 @@ export class AiService {
   ): Promise<T> {
     let delay = 1500;
     const maxRetries = 3;
+    const hasVision = Boolean(options?.imageBase64 || (options?.images && options.images.length > 0));
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       let decision: AiRoutingDecision;
@@ -90,6 +91,7 @@ export class AiService {
            requiredCapabilities: {
              tools: hasTools,
              structuredOutput: operation === "structured",
+             vision: hasVision,
              embeddings: operation === "embedding",
              googleSearch: Boolean(options?.googleSearch)
            }
@@ -131,6 +133,7 @@ export class AiService {
                    requiredCapabilities: {
                      tools: hasTools,
                      structuredOutput: operation === "structured",
+                     vision: hasVision,
                      embeddings: false,
                      googleSearch: Boolean(options?.googleSearch)
                    }
@@ -157,6 +160,7 @@ export class AiService {
                    requiredCapabilities: {
                      tools: hasTools,
                      structuredOutput: operation === "structured",
+                     vision: hasVision,
                      embeddings: false,
                      googleSearch: Boolean(options?.googleSearch)
                    }

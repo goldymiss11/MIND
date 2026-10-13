@@ -69,7 +69,7 @@ export class GeminiProvider implements AIProvider {
   public async generateText(prompt: string, options?: GenerateTextOptions): Promise<AiResponse<string>> {
     const tier: AiTaskTier = options?.tier ?? "standard";
     const model = resolveModel(tier, options?.model);
-    const contents = this.formatContentsWithHistory(prompt, options?.history);
+    const contents = this.formatContentsWithHistory(prompt, options?.history, options);
 
     const config: Record<string, any> = {};
     if (options?.systemInstruction) {
@@ -220,8 +220,42 @@ export class GeminiProvider implements AIProvider {
     return usage;
   }
 
-  private formatContentsWithHistory(prompt: string, history?: import('../types.js').AiMessage[]): any {
+  private formatContentsWithHistory(
+    prompt: string,
+    history?: import('../types.js').AiMessage[],
+    options?: GenerateTextOptions
+  ): any {
+    const imageParts: any[] = [];
+    if (options?.images && options.images.length > 0) {
+      for (const img of options.images) {
+        imageParts.push({
+          inlineData: {
+            data: img.data,
+            mimeType: img.mimeType,
+          },
+        });
+      }
+    } else if (options?.imageBase64) {
+      imageParts.push({
+        inlineData: {
+          data: options.imageBase64,
+          mimeType: options.mimeType || "image/jpeg",
+        },
+      });
+    }
+
     if (!history || history.length === 0) {
+      if (imageParts.length > 0) {
+        return [
+          {
+            role: "user",
+            parts: [
+              ...(prompt ? [{ text: prompt }] : []),
+              ...imageParts,
+            ],
+          },
+        ];
+      }
       return prompt;
     }
 
@@ -259,9 +293,12 @@ export class GeminiProvider implements AIProvider {
     });
 
     if (!prompt || !prompt.trim()) {
+      if (imageParts.length > 0) {
+        return [...formattedHistory, { role: "user", parts: imageParts }];
+      }
       return formattedHistory;
     }
-    return [...formattedHistory, { role: "user", parts: [{ text: prompt }] }];
+    return [...formattedHistory, { role: "user", parts: [{ text: prompt }, ...imageParts] }];
   }
 
   private parseJson<T>(rawText: string): T {

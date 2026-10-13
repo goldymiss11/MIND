@@ -31,6 +31,8 @@ export interface ExecutionRequest {
   telegramChatId?: string | number;
   confirmedToolCalls?: string[];
   source?: string;
+  imageBase64?: string;
+  mimeType?: string;
 }
 
 export interface ExecutionResult {

@@ -136,8 +136,13 @@ export class OrchestratorService {
   }
 
   // Backwards compatibility for tests
-  async handleIncomingMessage(telegramUserId: string | number, text: string, telegramChatId?: string | number) {
-    const res = await this.execute({ telegramUserId, text, telegramChatId });
+  async handleIncomingMessage(
+    telegramUserId: string | number,
+    text: string,
+    telegramChatId?: string | number,
+    options?: { imageBase64?: string; mimeType?: string }
+  ) {
+    const res = await this.execute({ telegramUserId, text, telegramChatId, ...options });
     return { text: res.response, artifacts: res.artifacts, citations: res.citations };
   }
 
@@ -475,6 +480,8 @@ If the user requests a presentation, you MUST use the artifact generation tool w
           history: iterations === 1 ? history.slice(0, -1) : currentHistory,
           tools: [{ functionDeclarations: aiTools }],
           googleSearch: isResearch,
+          imageBase64: iterations === 1 ? request.imageBase64 : undefined,
+          mimeType: iterations === 1 ? request.mimeType : undefined,
         });
       } catch (e: any) {
         if (isResearch) {
@@ -486,6 +493,8 @@ If the user requests a presentation, you MUST use the artifact generation tool w
               history: iterations === 1 ? history.slice(0, -1) : currentHistory,
               tools: [{ functionDeclarations: aiTools }],
               googleSearch: false,
+              imageBase64: iterations === 1 ? request.imageBase64 : undefined,
+              mimeType: iterations === 1 ? request.mimeType : undefined,
             });
           } catch (fallbackErr: any) {
             return {

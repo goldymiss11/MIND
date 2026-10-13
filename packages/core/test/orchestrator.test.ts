@@ -612,6 +612,54 @@ test("OrchestratorService: contains strict artifact routing instructions in syst
   assert.ok(capturedSystemInstruction.includes("Do NOT output markdown tables if the user asks for a table/excel"));
 });
 
+test("OrchestratorService: forwards imageBase64 and mimeType to ai.generateText", async () => {
+  let capturedOptions: any = null;
+
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-img", telegramId: 555 }) },
+      conversations: { findFirst: async () => ({ id: "conv-img", userId: "user-img", telegramChatId: "555" }) },
+    },
+    insert: () => ({
+      values: () => ({ returning: async () => [{ id: "msg-img" }] })
+    }),
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({ limit: async () => [] }),
+          limit: async () => []
+        })
+      })
+    })
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({
+      result: { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] },
+      usage: {}
+    }),
+    generateEmbedding: async () => ({ result: [0.1], usage: {} }),
+    generateText: async (_text: string, options: any) => {
+      capturedOptions = options;
+      return { result: "Вижу диаграмму", usage: {} };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  const res = await svc.handleIncomingMessage(
+    555,
+    "Опиши картинку",
+    undefined,
+    { imageBase64: "dGVzdC1pbWFnZQ==", mimeType: "image/png" }
+  );
+
+  assert.equal(res.text, "Вижу диаграмму");
+  assert.ok(capturedOptions);
+  assert.equal(capturedOptions.imageBase64, "dGVzdC1pbWFnZQ==");
+  assert.equal(capturedOptions.mimeType, "image/png");
+});
+
+
 
 
 

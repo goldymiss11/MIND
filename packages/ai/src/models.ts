@@ -38,30 +38,16 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     tiers: ["embedding"],
     capabilities: { supportsStructuredOutput: false, supportsToolCalling: false, supportsVision: false, supportsEmbeddings: true, supportsGoogleSearch: false }
   },
-  "openai/gpt-oss-20b": {
-    provider: "groq",
-    model: "openai/gpt-oss-20b",
-    pricingClass: "free",
-    tiers: ["simple"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
-  },
-  "openai/gpt-oss-120b": {
-    provider: "groq",
-    model: "openai/gpt-oss-120b",
-    pricingClass: "free",
-    tiers: ["standard", "complex"],
-    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
-  },
   "llama-3.1-8b-instant": {
     provider: "groq",
-    model: "openai/gpt-oss-20b",
+    model: "llama-3.1-8b-instant",
     pricingClass: "free",
     tiers: ["simple"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   },
   "llama-3.3-70b-versatile": {
     provider: "groq",
-    model: "openai/gpt-oss-120b",
+    model: "llama-3.3-70b-versatile",
     pricingClass: "free",
     tiers: ["standard", "complex"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }

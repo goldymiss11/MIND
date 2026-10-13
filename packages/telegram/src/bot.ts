@@ -25,7 +25,8 @@ export interface MessageHandler {
   handleIncomingMessage(
     userId: string,
     text: string,
-    chatId?: string
+    chatId?: string,
+    options?: { imageBase64?: string; mimeType?: string }
   ): Promise<{ text: string; artifacts?: { name: string; content: string | Buffer }[]; citations?: any[] }>;
   ensureUser?(
     telegramUserId: string | number,
@@ -530,6 +531,72 @@ export function setupBot(
     } catch (error) {
       console.error("Error processing Telegram voice message:", error);
       await ctx.reply("Произошла ошибка при обработке голосового сообщения. Попробуйте позже.");
+    }
+  });
+
+  // Listen to incoming photo messages
+  bot.on("message:photo", async (ctx) => {
+    const fromId = ctx.from?.id;
+    const chatId = ctx.chat?.id;
+    const photos = ctx.message.photo;
+
+    if (!fromId || !photos || photos.length === 0) {
+      return;
+    }
+
+    try {
+      await ctx.replyWithChatAction("typing");
+
+      // 2. Get highest-resolution photo (last element in array)
+      const highestPhoto = photos[photos.length - 1];
+      if (!highestPhoto) {
+        throw new Error("No photo found in message");
+      }
+
+      // 3. Get file path via ctx.getFile() and download via native fetch
+      const file = await ctx.getFile();
+      if (!file.file_path) {
+        throw new Error("Telegram did not provide a file_path for photo");
+      }
+
+      const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
+      const imageResponse = await fetch(fileUrl);
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download photo from Telegram: ${imageResponse.statusText}`);
+      }
+
+      // 4. Convert to base64 and determine MIME type
+      const arrayBuffer = await imageResponse.arrayBuffer();
+      const imageBase64 = Buffer.from(arrayBuffer).toString("base64");
+      const mimeType = file.file_path.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+
+      // 5. Extract optional user caption
+      const caption = ctx.message.caption || "Что изображено на этом фото? Проанализируй и помоги мне.";
+
+      // 6. Pass the image to the orchestrator
+      const { text: responseText, artifacts } = await orchestrator.handleIncomingMessage(
+        String(fromId),
+        caption,
+        chatId !== undefined ? String(chatId) : undefined,
+        { imageBase64, mimeType }
+      );
+
+      // 8. Return response to user
+      const messageContent = responseText?.trim() || "Готово";
+      const chunks = splitTelegramMessage(messageContent, 4000);
+      for (const chunk of chunks) {
+        await ctx.reply(chunk);
+      }
+
+      if (artifacts && artifacts.length > 0) {
+        for (const art of artifacts) {
+          const buf = Buffer.isBuffer(art.content) ? art.content : Buffer.from(art.content);
+          await ctx.replyWithDocument(new InputFile(buf, art.name));
+        }
+      }
+    } catch (error) {
+      console.error("Error processing Telegram photo message:", error);
+      await ctx.reply("Произошла ошибка при обработке фотографии. Попробуйте позже.");
     }
   });
 

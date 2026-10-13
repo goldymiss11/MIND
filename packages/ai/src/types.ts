@@ -51,6 +51,9 @@ export interface GenerateTextOptions {
   history?: AiMessage[];
   tools?: any[]; // We can unify this later, but keep as any[] for now
   googleSearch?: boolean;
+  imageBase64?: string;
+  mimeType?: string;
+  images?: Array<{ data: string; mimeType: string }>;
 }
 
 export interface GenerateStructuredOptions {

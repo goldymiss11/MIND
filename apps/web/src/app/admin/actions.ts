@@ -269,22 +269,6 @@ const KNOWN_MODEL_METADATA: Record<
     dailyRequestLimit: 1500,
     rpmLimit: 1500,
   },
-  "openai/gpt-oss-120b": {
-    displayName: "Llama 3.3 70B (Groq OSS 120B)",
-    provider: "groq",
-    tier: "complex",
-    dailyTokenLimit: 100000,
-    dailyRequestLimit: 1000,
-    rpmLimit: 30,
-  },
-  "openai/gpt-oss-20b": {
-    displayName: "Llama 3.1 8B (Groq OSS 20B)",
-    provider: "groq",
-    tier: "simple",
-    dailyTokenLimit: 500000,
-    dailyRequestLimit: 14400,
-    rpmLimit: 30,
-  },
   "llama-3.3-70b-versatile": {
     displayName: "Llama 3.3 70B Versatile (Groq)",
     provider: "groq",

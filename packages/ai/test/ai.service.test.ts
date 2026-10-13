@@ -331,4 +331,48 @@ test("AiRouter: throws Capability mismatch when googleSearch requested on model 
   }, /requires googleSearch/i);
 });
 
+test("MODEL_REGISTRY: Groq models have valid model identifiers and fake gpt-oss models are removed", async () => {
+  const { MODEL_REGISTRY } = await import("../src/models.js");
+
+  assert.equal(MODEL_REGISTRY["llama-3.1-8b-instant"]?.model, "llama-3.1-8b-instant");
+  assert.equal(MODEL_REGISTRY["llama-3.1-8b-instant"]?.provider, "groq");
+
+  assert.equal(MODEL_REGISTRY["llama-3.3-70b-versatile"]?.model, "llama-3.3-70b-versatile");
+  assert.equal(MODEL_REGISTRY["llama-3.3-70b-versatile"]?.provider, "groq");
+
+  assert.equal(MODEL_REGISTRY["openai/gpt-oss-20b"], undefined);
+  assert.equal(MODEL_REGISTRY["openai/gpt-oss-120b"], undefined);
+});
+
+test("GeminiProvider: generateText formats imageBase64 inlineData part correctly", async () => {
+  let capturedParams: any = null;
+  const mockClient: any = {
+    models: {
+      generateContent: async (params: any) => {
+        capturedParams = params;
+        return { text: "Вижу фото" };
+      },
+    },
+  };
+
+  const service = new AiService({ client: mockClient });
+  const res = await service.generateText("Что на фото?", {
+    imageBase64: "dGVzdC1kYXRh",
+    mimeType: "image/jpeg",
+    model: "gemini-3.5-flash",
+  });
+
+  assert.equal(res.result, "Вижу фото");
+  assert.ok(Array.isArray(capturedParams.contents));
+  assert.equal(capturedParams.contents[0]?.role, "user");
+  const parts = capturedParams.contents[0]?.parts;
+  assert.ok(Array.isArray(parts));
+  assert.equal(parts[0]?.text, "Что на фото?");
+  assert.deepEqual(parts[1]?.inlineData, {
+    data: "dGVzdC1kYXRh",
+    mimeType: "image/jpeg",
+  });
+});
+
+
 
