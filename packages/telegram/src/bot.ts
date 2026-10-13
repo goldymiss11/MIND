@@ -1,6 +1,6 @@
 import { Bot, type BotConfig, type Context, InlineKeyboard, InputFile, type Api } from "grammy";
 import { db, tasks, users, memories, type MindDb } from "@mind/db";
-import { eq, and, inArray, desc, asc, count } from "drizzle-orm";
+import { eq, and, inArray, desc, asc, count, sql } from "drizzle-orm";
 
 export const BOT_COMMANDS = [
   { command: "start", description: "Запустить/Перезапустить" },
@@ -349,6 +349,33 @@ export function setupBot(
     const action = data.slice(0, colonIndex);
     const taskId = data.slice(colonIndex + 1);
 
+    if (action === "feedback") {
+      try {
+        await ctx.answerCallbackQuery().catch(() => {});
+        if (database && typeof (database as any).execute === "function") {
+          await (database as any).execute(sql`
+            CREATE TABLE IF NOT EXISTS feedback_sessions (
+              telegram_id bigint PRIMARY KEY,
+              created_at timestamptz NOT NULL DEFAULT now()
+            );
+          `).catch(() => {});
+
+          await (database as any).execute(sql`
+            INSERT INTO feedback_sessions (telegram_id) VALUES (${fromId})
+            ON CONFLICT (telegram_id) DO NOTHING;
+          `).catch(() => {});
+        }
+        await ctx.reply(
+          "✍️ *Напиши в ответ любое сообщение:*\n\nЧто понравилось, чего не хватает, какие ошибки встретились или какую функцию добавить? Автор лично прочитает твой ответ 👇",
+          { parse_mode: "Markdown" }
+        );
+      } catch (fbErr) {
+        console.error("Error setting up feedback session:", fbErr);
+        await ctx.reply("Напиши своё сообщение в ответ, автор обязательно прочитает!");
+      }
+      return;
+    }
+
     if (!["done", "snz1", "snzd"].includes(action) || !taskId) {
       await ctx.answerCallbackQuery().catch(() => {});
       return;
@@ -608,6 +635,63 @@ export function setupBot(
 
     if (!fromId || !text) {
       return;
+    }
+
+    // 1. Intercept user feedback if active feedback session exists (ignore bot commands)
+    if (!text.startsWith("/") && database && typeof (database as any).execute === "function") {
+      try {
+        const sessionRes = await (database as any).execute(sql`
+          SELECT telegram_id FROM feedback_sessions WHERE telegram_id = ${fromId} LIMIT 1;
+        `);
+
+        if (sessionRes && sessionRes.rows && sessionRes.rows.length > 0) {
+          // Remove from active feedback sessions so next messages go to AI
+          await (database as any).execute(sql`
+            DELETE FROM feedback_sessions WHERE telegram_id = ${fromId};
+          `).catch(() => {});
+
+          // Save feedback into database
+          const username = ctx.from?.username || null;
+          await (database as any).execute(sql`
+            CREATE TABLE IF NOT EXISTS feedbacks (
+              id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+              telegram_id bigint NOT NULL,
+              username varchar(255),
+              text text NOT NULL,
+              source varchar(64) DEFAULT 'broadcast',
+              created_at timestamptz NOT NULL DEFAULT now()
+            );
+          `).catch(() => {});
+
+          await (database as any).execute(sql`
+            INSERT INTO feedbacks (telegram_id, username, text, source)
+            VALUES (${fromId}, ${username}, ${text}, 'broadcast');
+          `).catch(() => {});
+
+          // Optional notification to founder if ADMIN_TELEGRAM_ID is set
+          const adminTgId = process.env.ADMIN_TELEGRAM_ID;
+          if (adminTgId) {
+            try {
+              const userHandle = username ? `@${username}` : `ID: ${fromId}`;
+              await ctx.api.sendMessage(
+                adminTgId,
+                `📢 *Новый отзыв от пользователя* ${escapeMarkdown(userHandle)}:\n\n${escapeMarkdown(text)}`,
+                { parse_mode: "Markdown" }
+              );
+            } catch (fwdErr) {
+              console.warn("[bot] Failed to forward feedback to admin:", fwdErr);
+            }
+          }
+
+          // Warm acknowledgment to user without calling AI orchestrator
+          await ctx.reply(
+            "Спасибо за обратную связь! 🙌 Автор лично прочитает твой ответ.\n\nА теперь я снова готов к работе — можешь задавать мне любые вопросы или ставить задачи."
+          );
+          return;
+        }
+      } catch (checkErr) {
+        // Table may not exist yet if no broadcast has been sent, continue normally
+      }
     }
 
     try {

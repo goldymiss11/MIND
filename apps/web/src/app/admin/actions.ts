@@ -569,14 +569,29 @@ export async function getAiMetrics(): Promise<AiDashboardData> {
   }
 }
 
+export interface BroadcastOptions {
+  includeFeedbackButton?: boolean;
+  markAwaitingFeedback?: boolean;
+}
+
+export interface FeedbackItem {
+  id: string;
+  telegramId: string;
+  username: string | null;
+  text: string;
+  source: string;
+  createdAt: string;
+}
+
 /**
  * Sends a broadcast message to all registered Telegram users.
- * Respects Telegram rate limits (~25-30 msgs/sec), falls back to plain text
- * if Markdown fails, and catches individual delivery failures gracefully.
+ * Supports inline feedback buttons, registers feedback sessions,
+ * respects Telegram rate limits (~25-30 msgs/sec), and handles errors gracefully.
  */
 export async function sendBroadcast(
   messageText: string,
-  secret?: string
+  secret?: string,
+  options?: BroadcastOptions
 ): Promise<{ success: boolean; sent: number; failed: number; total: number; error?: string }> {
   const adminSecret = process.env.ADMIN_SECRET || "founder_super_secret_2026";
   if (!secret || secret !== adminSecret) {
@@ -625,6 +640,42 @@ export async function sendBroadcast(
     return { success: true, sent: 0, failed: 0, total: 0 };
   }
 
+  // Register recipients into feedback_sessions so their first reply is intercepted as feedback
+  const shouldMarkFeedback = options?.markAwaitingFeedback ?? true;
+  if (shouldMarkFeedback) {
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS feedback_sessions (
+          telegram_id bigint PRIMARY KEY,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+
+      for (const tid of recipients) {
+        await db.execute(sql`
+          INSERT INTO feedback_sessions (telegram_id) VALUES (${tid})
+          ON CONFLICT (telegram_id) DO NOTHING;
+        `);
+      }
+    } catch (sessionErr) {
+      console.warn("[sendBroadcast] Could not register feedback sessions:", sessionErr);
+    }
+  }
+
+  const shouldIncludeButton = options?.includeFeedbackButton ?? true;
+  const replyMarkup = shouldIncludeButton
+    ? {
+        inline_keyboard: [
+          [
+            {
+              text: "✍️ Оставить отзыв автору",
+              callback_data: "feedback:start",
+            },
+          ],
+        ],
+      }
+    : undefined;
+
   let sent = 0;
   let failed = 0;
 
@@ -632,14 +683,19 @@ export async function sendBroadcast(
 
   for (const telegramId of recipients) {
     try {
+      const payload: any = {
+        chat_id: telegramId,
+        text: trimmedText,
+        parse_mode: "Markdown",
+      };
+      if (replyMarkup) {
+        payload.reply_markup = replyMarkup;
+      }
+
       let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: telegramId,
-          text: trimmedText,
-          parse_mode: "Markdown",
-        }),
+        body: JSON.stringify(payload),
       });
 
       let resData: any = await res.json().catch(() => null);
@@ -651,11 +707,7 @@ export async function sendBroadcast(
         res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: telegramId,
-            text: trimmedText,
-            parse_mode: "Markdown",
-          }),
+          body: JSON.stringify(payload),
         });
         resData = await res.json().catch(() => null);
       }
@@ -666,13 +718,18 @@ export async function sendBroadcast(
         resData?.description &&
         /can't parse entities|entity/i.test(resData.description)
       ) {
+        const fallbackPayload: any = {
+          chat_id: telegramId,
+          text: trimmedText,
+        };
+        if (replyMarkup) {
+          fallbackPayload.reply_markup = replyMarkup;
+        }
+
         res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: telegramId,
-            text: trimmedText,
-          }),
+          body: JSON.stringify(fallbackPayload),
         });
         resData = await res.json().catch(() => null);
       }
@@ -702,4 +759,48 @@ export async function sendBroadcast(
     total: recipients.length,
   };
 }
+
+/**
+ * Retrieves list of user feedback collected from bot users
+ */
+export async function getFeedbacks(secret?: string): Promise<FeedbackItem[]> {
+  const adminSecret = process.env.ADMIN_SECRET || "founder_super_secret_2026";
+  if (!secret || secret !== adminSecret) {
+    return [];
+  }
+
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS feedbacks (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        telegram_id bigint NOT NULL,
+        username varchar(255),
+        text text NOT NULL,
+        source varchar(64) DEFAULT 'broadcast',
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+    `);
+
+    const res = await db.execute(sql`
+      SELECT id, telegram_id, username, text, source, created_at
+      FROM feedbacks
+      ORDER BY created_at DESC
+      LIMIT 100;
+    `);
+
+    const rows = (res as any).rows || [];
+    return rows.map((row: any) => ({
+      id: String(row.id),
+      telegramId: String(row.telegram_id),
+      username: row.username ? String(row.username) : null,
+      text: String(row.text),
+      source: row.source ? String(row.source) : "broadcast",
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+    }));
+  } catch (error) {
+    console.error("[getFeedbacks] Error fetching user feedbacks:", error);
+    return [];
+  }
+}
+
 

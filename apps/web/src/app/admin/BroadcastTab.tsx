@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Send,
   Users,
@@ -16,8 +16,12 @@ import {
   Shield,
   HelpCircle,
   CheckCheck,
+  MessageSquare,
+  ExternalLink,
+  Clock,
+  User,
 } from "lucide-react";
-import { sendBroadcast } from "./actions";
+import { sendBroadcast, getFeedbacks, type FeedbackItem } from "./actions";
 
 interface BroadcastTabProps {
   totalUsers: number;
@@ -34,30 +38,64 @@ interface BroadcastResult {
 
 const TEMPLATES = [
   {
+    title: "🎯 ТикТок: Личный фидбек",
+    text: `Привет! Это автор того самого видео из Тиктока 👋\n\nТы один из первых 11 человек, кто вообще залетел в MIND. Я пилю этого бота своими руками и не хочу делать очередную бесполезную нейросеть.\n\nСкажи честно прямо в этот чат: *что ты успел попробовать и где бот затупил / чего тебе не хватило?*\n\nЛюбая критика и баги приветствуются — я читаю каждый ответ лично!`,
+  },
+  {
+    title: "⚡️ ТикТок: Фича на миллион",
+    text: `Хей! Автор бота на связи ⚡️\n\nТы в числе первых 11 тестеров MIND. У меня к тебе всего один вопрос:\n\n*Какую ОДНУ функцию мне дописать прямо сейчас*, чтобы бот стал для тебя реально незаменимым каждый день?\n\nПросто нажми кнопку ниже или напиши ответ сообщением 👇`,
+  },
+  {
+    title: "🔢 ТикТок: Опрос 1-4",
+    text: `Йоу! Это создатель MIND из Тиктока 🤝\n\nЧтобы не грузить длинными вопросами, просто ответь цифрой от 1 до 4:\n\n1 — Всё круто, пользуюсь\n2 — Выдал ошибку / завис на запросе\n3 — Прикольно, но не понял зачем он мне\n4 — Не хватает конкретной фичи (напиши какой именно)\n\nЖду твой ответ!`,
+  },
+  {
     title: "📢 Обновление системы",
     text: `*🚀 Обновление MIND OS*\n\nМы обновили возможности искусственного интеллекта:\n• Добавлены новые модели генерации\n• Улучшена точность работы с артефактами\n• Повышена скорость ответов\n\n_Попробуйте отправить новый запрос прямо сейчас!_`,
-  },
-  {
-    title: "⚡ Новый навык",
-    text: `*✨ Новый навык в MIND OS!*\n\nТеперь бот умеет генерировать профессиональные таблицы и презентации еще быстрее.\n\nПросто напишите:\n\`Создай презентацию по теме: Стратегия развития 2026\``,
-  },
-  {
-    title: "🛠 Технические работы",
-    text: `*⚙️ Плановое обслуживание*\n\nСегодня в 03:00 по МСК будут проводиться технические работы по обновлению базы знаний.\nСервис может быть кратковременно недоступен в течение 5 минут.`,
   },
 ];
 
 export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
   const [messageText, setMessageText] = useState<string>("");
+  const [withFeedbackButton, setWithFeedbackButton] = useState<boolean>(true);
   const [isConfirmOpen, setIsConfirmOpen] = useState<boolean>(false);
   const [result, setResult] = useState<BroadcastResult | null>(null);
   const [isSending, setIsSending] = useState<boolean>(false);
+  const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
+  const [isLoadingFeedbacks, setIsLoadingFeedbacks] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Character limit for a single Telegram message
   const MAX_CHARS = 4096;
   const charsCount = messageText.length;
   const isOverLimit = charsCount > MAX_CHARS;
+
+  const getEffectiveSecret = useCallback(() => {
+    return (
+      adminSecret ||
+      (typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("secret") || ""
+        : "")
+    );
+  }, [adminSecret]);
+
+  // Load collected feedbacks
+  const fetchFeedbacks = useCallback(async () => {
+    setIsLoadingFeedbacks(true);
+    try {
+      const secret = getEffectiveSecret();
+      const data = await getFeedbacks(secret);
+      setFeedbacks(data);
+    } catch (err) {
+      console.error("[BroadcastTab] Failed to fetch feedbacks:", err);
+    } finally {
+      setIsLoadingFeedbacks(false);
+    }
+  }, [getEffectiveSecret]);
+
+  useEffect(() => {
+    fetchFeedbacks();
+  }, [fetchFeedbacks]);
 
   // Formatting insert helper
   const insertFormatting = (prefix: string, suffix: string, defaultText: string) => {
@@ -75,7 +113,6 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
 
     setMessageText(newText);
 
-    // Restore focus and cursor
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(
@@ -90,18 +127,16 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
     setIsSending(true);
     setResult(null);
 
-    const effectiveSecret =
-      adminSecret ||
-      (typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("secret") || ""
-        : "");
+    const effectiveSecret = getEffectiveSecret();
 
     try {
-      const res = await sendBroadcast(messageText, effectiveSecret);
+      const res = await sendBroadcast(messageText, effectiveSecret, {
+        includeFeedbackButton: withFeedbackButton,
+        markAwaitingFeedback: withFeedbackButton,
+      });
       setResult(res);
-      if (res.success && res.error === undefined) {
-        // Broadcast succeeded, keep message visible for review or clear if preferred
-      }
+      // Refresh feedbacks after sending
+      fetchFeedbacks();
     } catch (err: any) {
       console.error("[BroadcastTab] Error:", err);
       setResult({
@@ -128,7 +163,6 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
       );
     }
 
-    // Split code blocks ```...``` first
     const parts = rawText.split(/(```[\s\S]*?```)/g);
 
     return parts.map((part, pIdx) => {
@@ -213,22 +247,26 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
                 <Send className="w-5 h-5" />
               </div>
               <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-                Рассылка пользователям
+                Рассылка и Сбор Фидбека
               </h2>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                 <Users className="w-3.5 h-3.5" />
                 {totalUsers.toLocaleString()} получателей
               </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <MessageSquare className="w-3.5 h-3.5" />
+                {feedbacks.length} отзывов получено
+              </span>
             </div>
             <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed max-w-2xl">
-              Отправка системных уведомлений и анонсов всем зарегистрированным пользователям Telegram-бота MIND. Рассылка использует официальный Telegram Bot API с соблюдением глобальных лимитов (30 сообщений/сек).
+              Отправка сообщений всем пользователям Telegram-бота с автоматическим перехватом первого ответа. Бот не запускает AI на ответ пользователя, а сохраняет его как фидбек для основателя и вежливо благодарит.
             </p>
           </div>
 
           <div className="flex items-center gap-2 self-start md:self-auto">
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-950/80 border border-zinc-800 text-xs font-mono text-zinc-400">
               <Shield className="w-3.5 h-3.5 text-emerald-400" />
-              Rate-Limit Safe (~25 req/s)
+              Feedback Auto-Intercept
             </span>
           </div>
         </div>
@@ -321,7 +359,7 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
             <div className="space-y-2">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                Готовые шаблоны
+                Готовые шаблоны (ТикТок & Анонсы)
               </label>
               <div className="flex flex-wrap gap-2">
                 {TEMPLATES.map((tmpl, idx) => (
@@ -400,16 +438,36 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
                 disabled={isSending}
-                rows={12}
+                rows={11}
                 placeholder="Напишите текст рассылки... Поддерживается Telegram Markdown: *жирный*, _курсив_, `код`, [ссылка](url)"
                 className="w-full rounded-2xl bg-zinc-950/80 border border-zinc-800 p-4 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/40 transition-all resize-y font-sans leading-relaxed disabled:opacity-50"
               />
+
+              {/* Feedback Button Toggle */}
+              <div className="mt-3 p-3.5 rounded-2xl bg-blue-950/20 border border-blue-500/30 flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="feedback-toggle"
+                  checked={withFeedbackButton}
+                  onChange={(e) => setWithFeedbackButton(e.target.checked)}
+                  className="mt-1 w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                />
+                <label htmlFor="feedback-toggle" className="text-xs space-y-1 cursor-pointer select-none">
+                  <div className="font-semibold text-blue-300 flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+                    Прикрепить кнопку «✍️ Оставить отзыв автору» и перехватывать первое сообщение
+                  </div>
+                  <div className="text-[11px] text-zinc-400 leading-relaxed">
+                    Когда включено: бот добавит кнопку под сообщением, а также будет ждать ответ. Первое сообщение пользователя сохранится в базу, бот вежливо поблагодарит и не будет выполнять AI-команды на отзыв.
+                  </div>
+                </label>
+              </div>
 
               {/* Markdown Hint */}
               <div className="mt-2.5 flex items-start gap-2 text-[11px] text-zinc-500">
                 <HelpCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-zinc-400" />
                 <span>
-                  Поддерживается разметка Markdown: <code>*жирный*</code>, <code>_курсив_</code>, <code>`код`</code>, <code>[текст](url)</code>. Если разметка будет содержать синтаксическую ошибку, сообщение автоматически доставится обычным текстом без сбоев.
+                  Поддерживается разметка Markdown: <code>*жирный*</code>, <code>_курсив_</code>, <code>`код`</code>, <code>[текст](url)</code>.
                 </span>
               </div>
             </div>
@@ -479,7 +537,7 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
               </div>
 
               {/* Chat Canvas */}
-              <div className="p-4 flex-1 flex flex-col justify-end bg-gradient-to-b from-[#0e1621] to-[#0a0f18]">
+              <div className="p-4 flex-1 flex flex-col justify-end bg-gradient-to-b from-[#0e1621] to-[#0a0f18] space-y-2">
                 {/* Telegram Message Bubble */}
                 <div className="self-start max-w-[92%] rounded-2xl rounded-tl-sm bg-[#182533] border border-blue-500/20 text-zinc-100 p-3.5 shadow-xl text-xs sm:text-sm leading-relaxed relative space-y-2">
                   <div className="font-sans break-words">
@@ -494,17 +552,128 @@ export function BroadcastTab({ totalUsers, adminSecret }: BroadcastTabProps) {
                     <CheckCheck className="w-3.5 h-3.5 text-blue-400 inline" />
                   </div>
                 </div>
+
+                {/* Inline Keyboard Button Mock */}
+                {withFeedbackButton && (
+                  <div className="self-start w-[92%]">
+                    <div className="w-full py-2 px-3 rounded-xl bg-[#232e3c] hover:bg-[#2c394b] text-blue-400 border border-blue-500/30 text-center font-medium text-xs shadow-md flex items-center justify-center gap-1.5 select-none">
+                      <span>✍️ Оставить отзыв автору</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="text-[11px] text-zinc-500 px-1">
-              * Сообщение будет доставлено в личный диалог с ботом от имени официального аккаунта MIND.
+              * Пользователи увидят интерактивную кнопку, нажав которую смогут быстро отправить отзыв прямо в чат.
             </div>
           </div>
         </div>
       </div>
 
-      {/* 4. CONFIRMATION MODAL */}
+      {/* 4. COLLECTED FEEDBACKS SECTION */}
+      <section className="space-y-4">
+        <div className="rounded-3xl bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/80 p-6 sm:p-7 shadow-xl shadow-black/40 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <h3 className="text-lg font-bold text-white tracking-tight">
+                  Полученные отзывы от пользователей
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                  {feedbacks.length}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Ответы пользователей на рассылку. Первое входящее сообщение автоматически перехватывается ботом и не передаётся в AI.
+              </p>
+            </div>
+
+            <button
+              onClick={fetchFeedbacks}
+              disabled={isLoadingFeedbacks}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium bg-zinc-950 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 hover:border-zinc-700 transition-all active:scale-95 disabled:opacity-50 self-start sm:self-auto"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFeedbacks ? "animate-spin text-purple-400" : ""}`} />
+              <span>{isLoadingFeedbacks ? "Обновление..." : "Обновить список"}</span>
+            </button>
+          </div>
+
+          {feedbacks.length === 0 ? (
+            <div className="p-8 rounded-2xl bg-zinc-950/40 border border-zinc-800/60 text-center space-y-2">
+              <MessageSquare className="w-8 h-8 text-zinc-600 mx-auto" />
+              <div className="text-sm font-semibold text-zinc-300">Отзывов пока нет</div>
+              <p className="text-xs text-zinc-500 max-w-md mx-auto">
+                Отправьте рассылку пользователям с прикреплённой кнопкой отзыва, и их первые ответы появятся здесь в реальном времени.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {feedbacks.map((fb) => {
+                const tgLink = fb.username
+                  ? `https://t.me/${fb.username}`
+                  : `tg://user?id=${fb.telegramId}`;
+
+                return (
+                  <div
+                    key={fb.id}
+                    className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 hover:border-purple-500/40 transition-all space-y-3 shadow-lg group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
+                          <User className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                            {fb.username ? `@${fb.username}` : `ID: ${fb.telegramId}`}
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                              {fb.source || "broadcast"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <a
+                        href={tgLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 hover:underline"
+                        title="Написать пользователю в Telegram"
+                      >
+                        <span>Написать</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-zinc-900/80 border border-zinc-800/80 text-xs text-zinc-200 leading-relaxed font-sans whitespace-pre-wrap">
+                      {fb.text}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-1 border-t border-zinc-900">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {new Date(fb.createdAt).toLocaleString("ru-RU", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="font-mono text-[10px] text-zinc-600">ID: {fb.telegramId}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* 5. CONFIRMATION MODAL */}
       {isConfirmOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="max-w-md w-full rounded-3xl bg-zinc-900 border border-zinc-700/80 p-6 sm:p-7 space-y-5 shadow-2xl shadow-black">
