@@ -610,7 +610,7 @@ export async function sendBroadcast(
       sent: 0,
       failed: 0,
       total: 0,
-      error: "TELEGRAM_BOT_TOKEN не задан в переменных окружения",
+      error: "TELEGRAM_BOT_TOKEN не задан в переменных окружения Web-сервиса. Добавьте TELEGRAM_BOT_TOKEN в настройках сервиса Web на Render (вкладка Environment) — точно так же, как DATABASE_URL.",
     };
   }
 
