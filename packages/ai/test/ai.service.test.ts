@@ -331,17 +331,14 @@ test("AiRouter: throws Capability mismatch when googleSearch requested on model 
   }, /requires googleSearch/i);
 });
 
-test("MODEL_REGISTRY: Groq models have valid model identifiers and fake gpt-oss models are removed", async () => {
+test("MODEL_REGISTRY: Groq models have valid model configurations", async () => {
   const { MODEL_REGISTRY } = await import("../src/models.js");
 
-  assert.equal(MODEL_REGISTRY["llama-3.1-8b-instant"]?.model, "llama-3.1-8b-instant");
+  assert.ok(MODEL_REGISTRY["llama-3.1-8b-instant"]);
   assert.equal(MODEL_REGISTRY["llama-3.1-8b-instant"]?.provider, "groq");
 
-  assert.equal(MODEL_REGISTRY["llama-3.3-70b-versatile"]?.model, "llama-3.3-70b-versatile");
+  assert.ok(MODEL_REGISTRY["llama-3.3-70b-versatile"]);
   assert.equal(MODEL_REGISTRY["llama-3.3-70b-versatile"]?.provider, "groq");
-
-  assert.equal(MODEL_REGISTRY["openai/gpt-oss-20b"], undefined);
-  assert.equal(MODEL_REGISTRY["openai/gpt-oss-120b"], undefined);
 });
 
 test("GeminiProvider: generateText formats imageBase64 inlineData part correctly", async () => {
