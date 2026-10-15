@@ -40,14 +40,14 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
   },
   "llama-3.1-8b-instant": {
     provider: "groq",
-    model: "llama-3.1-8b-instant",
+    model: "openai/gpt-oss-20b",
     pricingClass: "free",
     tiers: ["simple"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
   },
   "llama-3.3-70b-versatile": {
     provider: "groq",
-    model: "llama-3.3-70b-versatile",
+    model: "openai/gpt-oss-120b",
     pricingClass: "free",
     tiers: ["standard", "complex"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: false, supportsEmbeddings: false, supportsGoogleSearch: false }
