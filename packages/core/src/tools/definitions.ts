@@ -176,7 +176,8 @@ export const invokeSkillTool: ToolDefinition = {
       prompt: { type: Type.STRING, description: "Подробный запрос или задание для выполнения навыком" },
       format: { type: Type.STRING, enum: ["docx", "md", "txt", "pptx", "xlsx"], description: "Формат файла: 'docx', 'md', 'txt', 'pptx' или 'xlsx'" },
       extension: { type: Type.STRING, enum: ["docx", "md", "txt", "pptx", "xlsx"], description: "Расширение файла: 'docx', 'md', 'txt', 'pptx' или 'xlsx'" },
-      content: { type: Type.STRING, description: "Опциональный готовый текст или JSON-контент для артефакта" }
+      content: { type: Type.STRING, description: "Опциональный готовый текст или JSON-контент для артефакта" },
+      isGost: { type: Type.BOOLEAN, description: "Применять ли оформление по ГОСТ 7.32 / 2.105 (Times New Roman 14pt, 1.5 интервал, поля 30/10/20/20 мм, абзацный отступ 1.25 см)" }
     },
     required: ["prompt"]
   },
@@ -188,6 +189,11 @@ export const invokeSkillTool: ToolDefinition = {
     let skillName = args.skillName?.trim();
     const rawFormat = (args.format || args.extension || "").toLowerCase().trim();
     const directContent = args.content;
+    const isGost = Boolean(
+      args.isGost === true ||
+      args.options?.isGost === true ||
+      /гост|реферат|курсов|лабораторн|отч[её]т|по стандарту/i.test(prompt || "")
+    );
 
     const persistArtifact = async (name: string, type: string, textContent: string | null = null) => {
       if (db && user?.id) {
@@ -409,10 +415,13 @@ export const invokeSkillTool: ToolDefinition = {
           : path.basename(skillName);
 
         try {
-          const docxBuffer = await markdownToDocx(skillContent, titleMatch?.[1] || "Документ");
+          const docxBuffer = await markdownToDocx(skillContent, {
+            defaultTitle: titleMatch?.[1] || "Документ",
+            isGost,
+          });
           const artifactName = `${cleanTitle}_${Date.now()}.docx`;
           generatedArtifacts.push({ name: artifactName, content: docxBuffer });
-          await persistArtifact(artifactName, "docx", null);
+          await persistArtifact(artifactName, "docx", skillContent);
 
           return {
             success: true,

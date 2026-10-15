@@ -1,7 +1,7 @@
 
 
 
-import { eq, and, desc, ne } from "drizzle-orm";
+import { eq, and, desc, ne, isNotNull } from "drizzle-orm";
 import { db as defaultDb, schema, type MindDb } from "@mind/db";
 import { AiService, AiMessage, Type } from "@mind/ai";
 import { MemoryService, type ExtractedMemoryItem } from "@mind/memory";
@@ -421,6 +421,23 @@ Rules:
 
     const isResearch = analyzerData?.intent === "research";
 
+    let recentArtifacts: any[] = [];
+    try {
+      recentArtifacts = await this.db
+        .select()
+        .from(schema.artifacts)
+        .where(
+          and(
+            eq(schema.artifacts.userId, user.id),
+            isNotNull(schema.artifacts.content)
+          )
+        )
+        .orderBy(desc(schema.artifacts.createdAt))
+        .limit(2);
+    } catch (artErr: any) {
+      console.warn("[OrchestratorService] Failed to retrieve recent artifacts:", artErr);
+    }
+
     // 6. Bounded Execution Loop
     let loopInstruction = `Ты MIND — персональный AI-ассистент.
 Текущее время UTC: ${nowIso}.
@@ -450,11 +467,22 @@ If the user requests a presentation, you MUST use the artifact generation tool w
       });
       loopInstruction += "\n\nАктивные задачи и напоминания в базе данных:\n" + formattedTasks.join("\n");
     }
+
+    if (recentArtifacts.length > 0) {
+      const lastArtifact = recentArtifacts[0];
+      loopInstruction += `\n\nПОСЛЕДНИЙ СОЗДАННЫЙ ДОКУМЕНТ ПОЛЬЗОВАТЕЛЯ:\n` +
+        `- Название: ${lastArtifact.name}\n` +
+        `- Тип: ${lastArtifact.type}\n` +
+        `- Содержимое:\n${lastArtifact.content}`;
+    }
+
+    loopInstruction += `\n\nЕсли пользователь просит дополнить, исправить, продолжить или переписать ранее созданный документ (например, 'добавь главу', 'исправь введение', 'допиши вывод'), ты ДОЛЖЕН взять содержимое последнего документа, применить изменения и передать полный обновлённый текст в инструмент \`invoke_skill\`.`;
+
     if (executionPlan) {
       loopInstruction += "\n\nПлан выполнения:\n" + JSON.stringify(executionPlan, null, 2);
     }
     loopInstruction += `\n\nДоступные специализированные навыки и действия:
-- Создание документов: При запросе написать статью, реферат, сочинение, отчет или создать документ в формате Word / docx / markdown, ВСЕГДА вызывай инструмент invoke_skill с skillName='document-generation'. Если запрошен Word/docx (или по умолчанию для документов), передавай format='docx'. Созданный файл будет автоматически прикреплен и отправлен в чат Telegram!
+- Создание документов: При запросе написать статью, реферат, сочинение, отчет или создать документ в формате Word / docx / markdown, ВСЕГДА вызывай инструмент invoke_skill с skillName='document-generation'. Если запрошен Word/docx (или по умолчанию для документов), передавай format='docx'. Для рефератов, курсовых, отчетов и при упоминании ГОСТ передавай isGost=true. Созданный файл будет автоматически прикреплен и отправлен в чат Telegram!
 - Создание презентаций: If the user requests a presentation, you MUST use the artifact generation tool with 'pptx' format. При запросе сделать презентацию, слайды или PowerPoint (.pptx), ВСЕГДА вызывай инструмент invoke_skill с skillName='presentation-generation' и format='pptx'. Созданный файл .pptx будет автоматически отправлен в чат Telegram!
 - Создание таблиц: If they request a spreadsheet/table, you MUST use 'xlsx' format. При запросе сделать таблицу, расчет или Excel-файл (.xlsx), ВСЕГДА вызывай инструмент invoke_skill с skillName='spreadsheet-generation' и format='xlsx'. Никогда не выдавай таблицы текстом, вызывай инструмент (Do NOT output markdown tables if the user asks for a table/excel). НИКОГДА не пиши фейковые ссылки (sandbox:/) для скачивания файлов, платформа прикрепит файл сама. Созданный файл .xlsx будет автоматически отправлен в чат Telegram!
 - Удаление задач: Если пользователь просит удалить задачу или встречу ("удали задачу", "удали напоминание"), ВСЕГДА вызывай delete_task с taskId или taskTitle.`;

@@ -659,6 +659,74 @@ test("OrchestratorService: forwards imageBase64 and mimeType to ai.generateText"
   assert.equal(capturedOptions.mimeType, "image/png");
 });
 
+test("OrchestratorService: injects last created artifact into system prompt for continuation", async () => {
+  let capturedSystemInstruction = "";
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-art", telegramId: 777 }) },
+      conversations: { findFirst: async () => ({ id: "conv-art", userId: "user-art", telegramChatId: "777" }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async () => [
+              {
+                id: "art-1",
+                userId: "user-art",
+                name: "Реферат_по_математике_123.docx",
+                type: "docx",
+                content: "# Реферат по дискретной математике\n\n## Глава 1\nТеория графов...",
+                createdAt: new Date()
+              }
+            ]
+          }),
+          limit: async () => []
+        })
+      })
+    })
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({
+      result: { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] },
+      usage: {}
+    }),
+    generateEmbedding: async () => ({ result: [0.1], usage: {} }),
+    generateText: async (_text: string, options: any) => {
+      capturedSystemInstruction = options?.systemInstruction || "";
+      return { result: "Хорошо, продолжаю документ", usage: {} };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  await svc.execute({ telegramUserId: 777, text: "Дополни файл второй главой" });
+
+  assert.ok(
+    capturedSystemInstruction.includes("ПОСЛЕДНИЙ СОЗДАННЫЙ ДОКУМЕНТ ПОЛЬЗОВАТЕЛЯ:"),
+    "System instruction must contain last created document header"
+  );
+  assert.ok(
+    capturedSystemInstruction.includes("- Название: Реферат_по_математике_123.docx"),
+    "System instruction must include artifact name"
+  );
+  assert.ok(
+    capturedSystemInstruction.includes("- Тип: docx"),
+    "System instruction must include artifact type"
+  );
+  assert.ok(
+    capturedSystemInstruction.includes("# Реферат по дискретной математике"),
+    "System instruction must include artifact content"
+  );
+  assert.ok(
+    capturedSystemInstruction.includes(
+      "Если пользователь просит дополнить, исправить, продолжить или переписать ранее созданный документ (например, 'добавь главу', 'исправь введение', 'допиши вывод'), ты ДОЛЖЕН взять содержимое последнего документа, применить изменения и передать полный обновлённый текст в инструмент `invoke_skill`."
+    ),
+    "System instruction must include continuation directive"
+  );
+});
+
 
 
 

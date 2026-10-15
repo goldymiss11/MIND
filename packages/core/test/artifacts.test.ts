@@ -6,7 +6,9 @@ import {
   renderXlsx,
   renderPptx,
   invokeSkillTool,
+  markdownToDocx,
 } from "../src/index.js";
+import JSZip from "jszip";
 
 test("SpreadsheetSchema: validates correctly with valid columns and rows", () => {
   const validData = {
@@ -380,5 +382,157 @@ test("invokeSkillTool: persists artifact to database when db and user are provid
   assert.equal(insertedRows[0]?.type, "markdown");
   assert.equal(insertedRows[0]?.content, "# Тестовый документ\n\nСодержимое статьи");
   assert.ok(insertedRows[0]?.name.endsWith(".md"));
+});
+
+test("markdownToDocx: formats document according to academic GOST standards when isGost=true", async () => {
+  const markdown = `# Введение
+## Глава 1. Теоретические основы
+### Параграф 1.1. Понятия
+Обычный абзац текста научной работы, который должен быть отформатирован строго по ГОСТ 7.32 / 2.105.
+- Первый пункт перечня
+- Второй пункт перечня
+1. Первый нумерованный пункт
+2. Второй нумерованный пункт
+`;
+
+  const buffer = await markdownToDocx(markdown, { isGost: true });
+  assert.ok(Buffer.isBuffer(buffer));
+  assert.ok(buffer.length > 1000);
+
+  const zip = await JSZip.loadAsync(buffer);
+  const docXml = await zip.file("word/document.xml")?.async("text");
+  const stylesXml = await zip.file("word/styles.xml")?.async("text");
+
+  assert.ok(docXml, "document.xml must exist in docx");
+  assert.ok(stylesXml, "styles.xml must exist in docx");
+
+  // 1. Page Margins: Left 30mm (1700), Right 10mm (567), Top 20mm (1134), Bottom 20mm (1134)
+  assert.ok(docXml.includes('w:left="1700"'), "Left margin must be 1700 twips (30mm)");
+  assert.ok(docXml.includes('w:right="567"'), "Right margin must be 567 twips (10mm)");
+  assert.ok(docXml.includes('w:top="1134"'), "Top margin must be 1134 twips (20mm)");
+  assert.ok(docXml.includes('w:bottom="1134"'), "Bottom margin must be 1134 twips (20mm)");
+
+  // 2. Strict font & size in styles & document: Times New Roman, 14pt (size 28)
+  assert.ok(stylesXml.includes("Times New Roman"), "Default font face must be Times New Roman");
+  assert.ok(stylesXml.includes('w:sz w:val="28"'), "Default size must be 28 (14pt)");
+  assert.ok(stylesXml.includes('w:line="360"'), "Default line spacing must be 360 (1.5 lines)");
+
+  // 3. Paragraph Indent & Alignment: 1.25 cm (720 twips) indent, justified alignment (both)
+  assert.ok(docXml.includes('w:firstLine="720"'), "Paragraph indent must be 720 twips (1.25cm)");
+  assert.ok(docXml.includes('w:jc w:val="both"'), "Paragraph alignment must be justified ('both')");
+});
+
+test("markdownToDocx: retains standard fallback formatting when isGost is false or omitted", async () => {
+  const markdown = "Обычный текст без оформления по ГОСТ.";
+  const buffer = await markdownToDocx(markdown, { defaultTitle: "Документ", isGost: false });
+
+  const zip = await JSZip.loadAsync(buffer);
+  const docXml = await zip.file("word/document.xml")?.async("text");
+  assert.ok(docXml);
+
+  // Standard fallback should not set GOST margins
+  assert.ok(!docXml.includes('w:left="1700"'), "Standard docx must not enforce 30mm GOST margin");
+});
+
+test("invokeSkillTool: respects args.content directly without invoking AI", async () => {
+  const artifacts: any[] = [];
+  let aiCalled = false;
+  const mockContext: any = {
+    ai: {
+      generateText: async () => {
+        aiCalled = true;
+        return { result: "Hallucinated AI text" };
+      }
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const directMarkdown = "# Утвержденный документ\n\nЭтот текст передан напрямую без генерации.";
+
+  const res = await invokeSkillTool.execute(
+    {
+      skillName: "document-generation",
+      prompt: "Дополни файл новыми данными",
+      format: "docx",
+      content: directMarkdown
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(aiCalled, false, "AI must NOT be called when content is provided");
+  assert.equal(artifacts.length, 1);
+  assert.ok(artifacts[0]?.name.endsWith(".docx"));
+});
+
+test("invokeSkillTool: auto-detects GOST formatting from keywords in prompt", async () => {
+  const artifacts: any[] = [];
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({
+        result: "# Реферат по дискретной математике\n\nТекст научной работы студента."
+      })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      skillName: "document-generation",
+      prompt: "Сделай реферат по ГОСТу на тему алгоритмов",
+      format: "docx"
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(artifacts.length, 1);
+  const buffer = artifacts[0]?.content;
+  const zip = await JSZip.loadAsync(buffer);
+  const docXml = await zip.file("word/document.xml")?.async("text");
+  assert.ok(docXml?.includes('w:left="1700"'), "Prompt matching /по ГОСТу/ must trigger GOST 30mm margin");
+});
+
+test("invokeSkillTool: persists skillContent to database for docx artifacts", async () => {
+  const artifacts: any[] = [];
+  const insertedRows: any[] = [];
+  const mockDb = {
+    insert: (_table: any) => ({
+      values: async (data: any) => {
+        insertedRows.push(data);
+        return [data];
+      }
+    })
+  };
+
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({
+        result: "# Курсовая работа\n\nТекст первой главы."
+      })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {},
+    db: mockDb,
+    user: { id: "user-docx-test" },
+    conversationId: "conv-docx-test"
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      skillName: "document-generation",
+      prompt: "Напиши курсовую работу",
+      format: "docx"
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(insertedRows.length, 1);
+  assert.equal(insertedRows[0]?.type, "docx");
+  assert.equal(insertedRows[0]?.content, "# Курсовая работа\n\nТекст первой главы.");
+  assert.ok(insertedRows[0]?.name.endsWith(".docx"));
 });
 
