@@ -7,6 +7,7 @@ import {
   renderPptx,
   invokeSkillTool,
   markdownToDocx,
+  stripCodeFences,
 } from "../src/index.js";
 import JSZip from "jszip";
 
@@ -213,10 +214,13 @@ test("invokeSkillTool: generates binary PPTX artifact when format='pptx' request
 });
 
 test("invokeSkillTool: definition conforms to strict requirements", () => {
+  const codeFilesPhrase = "MUST use this tool to generate downloadable files: DOCX, PPTX, XLSX, as well as programming code files (.py, .sql, .cpp, .js, .ts, .html, .json). Do NOT dump raw code into chat if the user asks for a script, program or lab work — output it as a real code file!";
+  assert.ok(invokeSkillTool.description.includes(codeFilesPhrase));
+
   const strictPhrase = "MUST use this tool to generate Excel spreadsheets (.xlsx) and PowerPoint presentations (.pptx). Do NOT output markdown tables if the user asks for a table/excel. Do NOT hallucinate download links.";
   assert.ok(invokeSkillTool.description.includes(strictPhrase));
 
-  const expectedEnum = ["docx", "md", "txt", "pptx", "xlsx"];
+  const expectedEnum = ["docx", "md", "txt", "pptx", "xlsx", "py", "sql", "cpp", "c", "js", "ts", "html", "css", "json"];
   const formatEnum = invokeSkillTool.inputSchema.properties.format.enum;
   assert.deepEqual(formatEnum, expectedEnum);
 
@@ -535,4 +539,154 @@ test("invokeSkillTool: persists skillContent to database for docx artifacts", as
   assert.equal(insertedRows[0]?.content, "# Курсовая работа\n\nТекст первой главы.");
   assert.ok(insertedRows[0]?.name.endsWith(".docx"));
 });
+
+test("stripCodeFences: strips standard markdown code fences with language tags", () => {
+  const fenced = "```python\ndef hello():\n    return 'world'\n```";
+  assert.equal(stripCodeFences(fenced), "def hello():\n    return 'world'");
+});
+
+test("stripCodeFences: handles template literals inside code without breaking", () => {
+  const jsCode = "```ts\nconst msg = `hello ${name}`;\nconsole.log(msg);\n```";
+  assert.equal(stripCodeFences(jsCode), "const msg = `hello ${name}`;\nconsole.log(msg);");
+});
+
+test("stripCodeFences: extracts code from fenced block embedded inside text", () => {
+  const textWithBlock = "Вот ваш скрипт на Python:\n```python\nimport os\nprint(os.getcwd())\n```\nНадеюсь, помог!";
+  assert.equal(stripCodeFences(textWithBlock), "import os\nprint(os.getcwd())");
+});
+
+test("stripCodeFences: preserves pure code without fences untouched", () => {
+  const rawCode = "SELECT id, name FROM users WHERE active = true;";
+  assert.equal(stripCodeFences(rawCode), rawCode);
+});
+
+test("invokeSkillTool: generates pure Python code file (.py) and strips markdown code fences", async () => {
+  const artifacts: any[] = [];
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({
+        result: "```python\nimport requests\n\ndef fetch_data(url):\n    response = requests.get(url)\n    return response.json()\n```"
+      })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Напиши скрипт парсера на Python",
+      format: "py"
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(artifacts.length, 1);
+  assert.ok(artifacts[0]?.name.endsWith(".py"));
+  assert.ok(Buffer.isBuffer(artifacts[0]?.content));
+
+  const codeString = artifacts[0]?.content.toString("utf-8");
+  assert.ok(!codeString.includes("```"), "Generated code file must NOT contain markdown code fences");
+  assert.ok(codeString.includes("import requests"));
+  assert.ok(codeString.includes("def fetch_data(url):"));
+});
+
+test("invokeSkillTool: respects explicit filename in args or prompt", async () => {
+  const artifacts: any[] = [];
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({
+        result: "def solve():\n    pass"
+      })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {}
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Напиши скрипт парсера и сохрани в parser.py",
+      format: "py",
+      filename: "parser.py"
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0]?.name, "parser.py");
+});
+
+test("invokeSkillTool: auto-detects code format from prompt keywords", async () => {
+  const testCases = [
+    { prompt: "Напиши функцию на python для поиска пути", expectedExt: ".py" },
+    { prompt: "Создай скрипт бд с таблицами пользователей create table", expectedExt: ".sql" },
+    { prompt: "Напиши программу на c++ для сортировки массива", expectedExt: ".cpp" },
+    { prompt: "Сделай typescript модуль для валидации", expectedExt: ".ts" },
+    { prompt: "Сверстай веб-страницу профиля пользователя", expectedExt: ".html" }
+  ];
+
+  for (const tc of testCases) {
+    const artifacts: any[] = [];
+    const mockContext: any = {
+      ai: {
+        generateText: async () => ({
+          result: "// test code content"
+        })
+      },
+      generatedArtifacts: artifacts,
+      logAiRun: async () => {}
+    };
+
+    const res = await invokeSkillTool.execute(
+      { prompt: tc.prompt },
+      mockContext
+    );
+
+    assert.equal(res.success, true, `Failed for prompt: ${tc.prompt}`);
+    assert.equal(artifacts.length, 1);
+    assert.ok(artifacts[0]?.name.endsWith(tc.expectedExt), `Expected ${tc.expectedExt} for prompt: ${tc.prompt}, got ${artifacts[0]?.name}`);
+  }
+});
+
+test("invokeSkillTool: persists code artifacts to database with pure code content", async () => {
+  const artifacts: any[] = [];
+  const insertedRows: any[] = [];
+  const mockDb = {
+    insert: (_table: any) => ({
+      values: async (data: any) => {
+        insertedRows.push(data);
+        return [data];
+      }
+    })
+  };
+
+  const mockContext: any = {
+    ai: {
+      generateText: async () => ({
+        result: "```sql\nCREATE TABLE students (id SERIAL PRIMARY KEY, name TEXT);\n```"
+      })
+    },
+    generatedArtifacts: artifacts,
+    logAiRun: async () => {},
+    db: mockDb,
+    user: { id: "user-sql-test" },
+    conversationId: "conv-sql-test"
+  };
+
+  const res = await invokeSkillTool.execute(
+    {
+      prompt: "Создай SQL скрипт схемы базы данных",
+      format: "sql"
+    },
+    mockContext
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(insertedRows.length, 1);
+  assert.equal(insertedRows[0]?.type, "sql");
+  assert.equal(insertedRows[0]?.content, "CREATE TABLE students (id SERIAL PRIMARY KEY, name TEXT);");
+  assert.ok(insertedRows[0]?.name.endsWith(".sql"));
+});
+
 

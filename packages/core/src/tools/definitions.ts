@@ -166,17 +166,58 @@ function extractJsonFromText(raw: string): any {
   }
 }
 
+/**
+ * Strips markdown code fences (```lang ... ```) and returns strictly valid, executable code.
+ */
+export function stripCodeFences(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+
+  // 1. Entire string wrapped in code fences (e.g. ```python\n...\n```)
+  const fullBlockMatch = trimmed.match(/^```[a-zA-Z0-9_+#.-]*\r?\n([\s\S]*)\r?\n```$/);
+  if (fullBlockMatch && fullBlockMatch[1] !== undefined) {
+    return fullBlockMatch[1].trim();
+  }
+
+  // 2. Fenced block inside text
+  const blockMatch = trimmed.match(/```[a-zA-Z0-9_+#.-]*\r?\n([\s\S]*?)\r?\n```/);
+  if (blockMatch && blockMatch[1] !== undefined) {
+    return blockMatch[1].trim();
+  }
+
+  // 3. Single-line code fence
+  const singleLineMatch = trimmed.match(/^```[a-zA-Z0-9_+#.-]*\s*([\s\S]*?)\s*```$/);
+  if (singleLineMatch && singleLineMatch[1] !== undefined) {
+    return singleLineMatch[1].trim();
+  }
+
+  // 4. Fallback: strip leading ```lang or trailing ``` if unmatched
+  return trimmed
+    .replace(/^```[a-zA-Z0-9_+#.-]*\r?\n?/, "")
+    .replace(/\r?\n?```$/, "")
+    .trim();
+}
+
 export const invokeSkillTool: ToolDefinition = {
   name: "invoke_skill",
-  description: "Вызывает специализированный навык (agent skill) для создания документов, презентаций и таблиц. MUST use this tool to generate Excel spreadsheets (.xlsx) and PowerPoint presentations (.pptx). Do NOT output markdown tables if the user asks for a table/excel. Do NOT hallucinate download links.",
+  description: "MUST use this tool to generate downloadable files: DOCX, PPTX, XLSX, as well as programming code files (.py, .sql, .cpp, .js, .ts, .html, .json). Do NOT dump raw code into chat if the user asks for a script, program or lab work — output it as a real code file! MUST use this tool to generate Excel spreadsheets (.xlsx) and PowerPoint presentations (.pptx). Do NOT output markdown tables if the user asks for a table/excel. Do NOT hallucinate download links.",
   inputSchema: {
     type: Type.OBJECT,
     properties: {
-      skillName: { type: Type.STRING, description: "Название навыка: 'document-generation', 'presentation-generation', 'spreadsheet-generation'" },
+      skillName: { type: Type.STRING, description: "Название навыка: 'document-generation', 'presentation-generation', 'spreadsheet-generation', 'coding'" },
       prompt: { type: Type.STRING, description: "Подробный запрос или задание для выполнения навыком" },
-      format: { type: Type.STRING, enum: ["docx", "md", "txt", "pptx", "xlsx"], description: "Формат файла: 'docx', 'md', 'txt', 'pptx' или 'xlsx'" },
-      extension: { type: Type.STRING, enum: ["docx", "md", "txt", "pptx", "xlsx"], description: "Расширение файла: 'docx', 'md', 'txt', 'pptx' или 'xlsx'" },
+      format: {
+        type: Type.STRING,
+        enum: ["docx", "md", "txt", "pptx", "xlsx", "py", "sql", "cpp", "c", "js", "ts", "html", "css", "json"],
+        description: "Формат файла: 'docx', 'md', 'txt', 'pptx', 'xlsx', 'py', 'sql', 'cpp', 'c', 'js', 'ts', 'html', 'css', 'json'"
+      },
+      extension: {
+        type: Type.STRING,
+        enum: ["docx", "md", "txt", "pptx", "xlsx", "py", "sql", "cpp", "c", "js", "ts", "html", "css", "json"],
+        description: "Расширение файла: 'docx', 'md', 'txt', 'pptx', 'xlsx', 'py', 'sql', 'cpp', 'c', 'js', 'ts', 'html', 'css', 'json'"
+      },
       content: { type: Type.STRING, description: "Опциональный готовый текст или JSON-контент для артефакта" },
+      filename: { type: Type.STRING, description: "Опциональное имя файла (например, 'script.py', 'main.cpp', 'schema.sql')" },
       isGost: { type: Type.BOOLEAN, description: "Применять ли оформление по ГОСТ 7.32 / 2.105 (Times New Roman 14pt, 1.5 интервал, поля 30/10/20/20 мм, абзацный отступ 1.25 см)" }
     },
     required: ["prompt"]
@@ -219,8 +260,26 @@ export const invokeSkillTool: ToolDefinition = {
     if (!format) {
       if (skillName === "presentation-generation" || /(\.pptx|pptx|презентаци|слайд|powerpoint)/i.test(prompt)) {
         format = "pptx";
+      } else if (/(\.sql|sql|баз[аы] данных|скрипт бд|create table)/i.test(prompt)) {
+        format = "sql";
+      } else if (/(\.py|python|питон)/i.test(prompt)) {
+        format = "py";
       } else if (skillName === "spreadsheet-generation" || /(\.xlsx|xlsx|таблиц|excel|эксель)/i.test(prompt)) {
         format = "xlsx";
+      } else if (/(\.cpp|c\+\+|плюс[ыа])/i.test(prompt)) {
+        format = "cpp";
+      } else if (/(\.c\b)/i.test(prompt)) {
+        format = "c";
+      } else if (/(\.ts|typescript)/i.test(prompt)) {
+        format = "ts";
+      } else if (/(\.js|javascript)/i.test(prompt)) {
+        format = "js";
+      } else if (/(\.html|веб-страниц|верстк)/i.test(prompt)) {
+        format = "html";
+      } else if (/(\.css|стили)/i.test(prompt)) {
+        format = "css";
+      } else if (/(\.json|json)/i.test(prompt)) {
+        format = "json";
       } else if (/(txt|текст)/i.test(prompt)) {
         format = "txt";
       } else if (/(\.docx|docx|в docx|в ворд|word)/i.test(prompt)) {
@@ -230,14 +289,31 @@ export const invokeSkillTool: ToolDefinition = {
       }
     }
 
-    // Guard against presentation or table mistakenly routed with docx format
+    // Guard against presentation, spreadsheet or code mistakenly routed with docx format
     if (format === "docx" && !/(\.docx|docx|в docx|в ворд|word)/i.test(prompt)) {
       if (skillName === "presentation-generation" || /(\.pptx|pptx|презентаци|слайд|powerpoint)/i.test(prompt)) {
         format = "pptx";
+      } else if (/(\.sql|sql|баз[аы] данных|скрипт бд|create table)/i.test(prompt)) {
+        format = "sql";
+      } else if (/(\.py|python|питон)/i.test(prompt)) {
+        format = "py";
       } else if (skillName === "spreadsheet-generation" || /(\.xlsx|xlsx|таблиц|excel|эксель)/i.test(prompt)) {
         format = "xlsx";
+      } else if (/(\.cpp|c\+\+|плюс[ыа])/i.test(prompt)) {
+        format = "cpp";
+      } else if (/(\.c\b)/i.test(prompt)) {
+        format = "c";
+      } else if (/(\.ts|typescript)/i.test(prompt)) {
+        format = "ts";
+      } else if (/(\.js|javascript)/i.test(prompt)) {
+        format = "js";
+      } else if (/(\.html|веб-страниц|верстк)/i.test(prompt)) {
+        format = "html";
       }
     }
+
+    const codeFormats = ["py", "sql", "cpp", "c", "js", "ts", "html", "css", "json"];
+    const isCodeFormat = codeFormats.includes(format);
 
     // Auto-infer skillName if omitted
     if (!skillName) {
@@ -245,6 +321,8 @@ export const invokeSkillTool: ToolDefinition = {
         skillName = "presentation-generation";
       } else if (format === "xlsx") {
         skillName = "spreadsheet-generation";
+      } else if (isCodeFormat) {
+        skillName = "coding";
       } else {
         skillName = "document-generation";
       }
@@ -260,6 +338,8 @@ export const invokeSkillTool: ToolDefinition = {
         skillMdContent = "Ты эксперт по созданию презентаций. Сформируй валидный JSON структуры PresentationSchema.";
       } else if (format === "docx" || skillName === "document-generation") {
         skillMdContent = "Ты эксперт по созданию документов. Сформируй структурированный Markdown.";
+      } else if (isCodeFormat || skillName === "coding") {
+        skillMdContent = `Ты senior software engineer. Напиши чистый, рабочий, готовый к выполнению исходный код на ${format}.`;
       } else {
         skillMdContent = "Ты эксперт по созданию артефактов и файлов.";
       }
@@ -290,7 +370,7 @@ export const invokeSkillTool: ToolDefinition = {
   "rows": [
     ["Значение 1", "Значение 2"]
   ]
-}`;
+} \n\nВАЖНО: Никаких markdown code blocks, только чистый JSON!`;
       } else if (format === "pptx") {
         systemInstruction += `\n\nВАЖНО: Верни строго валидный JSON в формате PresentationSchema без markdown-обёртки:
 {
@@ -305,6 +385,9 @@ export const invokeSkillTool: ToolDefinition = {
     }
   ]
 }`;
+      } else if (isCodeFormat) {
+        systemInstruction += `\n\nВАЖНО: Ты создаешь файл исходного кода с расширением .${format}.
+Верни ТОЛЬКО валидный исполняемый код программы без пояснительного текста до и после кода. Оберни код в блок \`\`\`${format} ... \`\`\` или верни чистый код. Никаких вводных слов и пояснений.`;
       }
 
       const skillResponse = await ai.generateText(prompt, {
@@ -406,6 +489,55 @@ export const invokeSkillTool: ToolDefinition = {
             error: `Ошибка при генерации таблицы XLSX: ${xlsxErr.message}`
           };
         }
+      }
+
+      case "py":
+      case "sql":
+      case "cpp":
+      case "c":
+      case "js":
+      case "ts":
+      case "html":
+      case "css":
+      case "json": {
+        const rawContent = skillContent || (typeof directContent === "string" ? directContent : (typeof directContent === "object" && directContent !== null ? JSON.stringify(directContent, null, 2) : ""));
+        const cleanCode = stripCodeFences(rawContent);
+        const codeBuffer = Buffer.from(cleanCode, "utf-8");
+
+        const explicitFileMatch = typeof prompt === "string" ? prompt.match(new RegExp(`\\b([a-zA-Z0-9_\\-]+\\.${format})\\b`, "i")) : null;
+        const explicitName = (args.filename || args.name || (explicitFileMatch ? explicitFileMatch[1] : null))?.trim();
+
+        let artifactName: string;
+        if (explicitName) {
+          const baseExplicit = path.basename(explicitName);
+          artifactName = baseExplicit.toLowerCase().endsWith(`.${format}`) ? baseExplicit : `${baseExplicit}.${format}`;
+        } else {
+          let cleanTitle = "code";
+          if (args.title) {
+            cleanTitle = String(args.title).replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30);
+          } else {
+            const commentTitleMatch = cleanCode.match(/^(?:#|\/\/|\/\*|--)\s*(?:file:?\s*)?([a-zA-Z0-9_.-]+)/im);
+            if (commentTitleMatch && commentTitleMatch[1]) {
+              cleanTitle = commentTitleMatch[1].replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30);
+            } else if (prompt) {
+              const promptKeywords = prompt.replace(/[^a-zA-Zа-яА-Я0-9_]/g, "_").replace(/_+/g, "_").slice(0, 20);
+              cleanTitle = promptKeywords || format;
+            } else {
+              cleanTitle = format;
+            }
+          }
+          cleanTitle = cleanTitle.replace(/^_+|_+$/g, "") || format;
+          artifactName = `${cleanTitle}_${Date.now()}.${format}`;
+        }
+
+        generatedArtifacts.push({ name: artifactName, content: codeBuffer });
+        await persistArtifact(artifactName, format, cleanCode);
+
+        return {
+          success: true,
+          message: `Файл ${artifactName} successfully generated and attached to response. ВАЖНО: Файл УЖЕ прикреплен к твоему ответу платформой. Не дублируй весь код простыней в чат, просто подтверди пользователю создание файла.`,
+          artifactName
+        };
       }
 
       case "docx": {

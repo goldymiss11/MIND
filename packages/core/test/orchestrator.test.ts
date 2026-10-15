@@ -727,6 +727,148 @@ test("OrchestratorService: injects last created artifact into system prompt for 
   );
 });
 
+test("OrchestratorService: contains Submission Package instructions in system prompt", async () => {
+  let capturedSystemInstruction = "";
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-pkg", telegramId: 888 }) },
+      conversations: { findFirst: async () => ({ id: "conv-pkg", userId: "user-pkg", telegramChatId: "888" }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({ limit: async () => [] }),
+          limit: async () => []
+        })
+      })
+    })
+  };
+
+  const mockAi: any = {
+    generateStructured: async () => ({
+      result: { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] },
+      usage: {}
+    }),
+    generateEmbedding: async () => ({ result: [0.1], usage: {} }),
+    generateText: async (_prompt: string, options: any) => {
+      capturedSystemInstruction = options.systemInstruction;
+      return { result: "Готово", usage: {} };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  await svc.execute({ telegramUserId: 888, text: "Напиши лабораторную работу" });
+
+  assert.ok(
+    capturedSystemInstruction.includes("ПАКЕТ СДАЧИ ПОД КЛЮЧ (SUBMISSION PACKAGE):"),
+    "System instruction must contain Submission Package section"
+  );
+  assert.ok(
+    capturedSystemInstruction.includes("Ты МОЖЕШЬ и ДОЛЖЕН вызывать инструмент invoke_skill НЕСКОЛЬКО РАЗ за одну итерацию:"),
+    "System instruction must instruct multiple invoke_skill calls per iteration"
+  );
+  assert.ok(
+    capturedSystemInstruction.includes("Генерация файлов кода:"),
+    "System instruction must instruct code file generation instead of chat dumping"
+  );
+});
+
+test("OrchestratorService: executes multi-file Submission Package (.py + .docx) in single response", async () => {
+  const mockDb: any = {
+    query: {
+      users: { findFirst: async () => ({ id: "user-sub", telegramId: 999 }) },
+      conversations: { findFirst: async () => ({ id: "conv-sub", userId: "user-sub", telegramChatId: "999" }) },
+    },
+    insert: () => ({ values: () => ({ returning: async () => [{ id: "msg-1" }] }) }),
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({ limit: async () => [] }),
+          limit: async () => []
+        })
+      })
+    })
+  };
+
+  let loopCalls = 0;
+  const mockAi: any = {
+    generateStructured: async (_text: string, schema: any) => {
+      if (schema?.properties?.goal) {
+        return {
+          result: {
+            goal: "Подготовить скрипт и отчет",
+            steps: [{ id: "1", type: "generate_artifact", description: "Сгенерировать пакет" }]
+          },
+          usage: {}
+        };
+      }
+      return {
+        result: { intent: "complex", hasMemory: false, memories: [], hasTask: false, tasks: [] },
+        usage: {}
+      };
+    },
+    generateEmbedding: async () => ({ result: [0.1], usage: {} }),
+    generateText: async (prompt: string, options: any) => {
+      // Check if this is a sub-call from invokeSkillTool
+      if (options?.systemInstruction?.includes("Ты senior software engineer") || options?.systemInstruction?.includes("файл исходного кода")) {
+        return {
+          result: "```python\nimport requests\n\ndef run():\n    print('parser done')\n```",
+          usage: {}
+        };
+      }
+      if (options?.systemInstruction?.includes("Ты эксперт по созданию документов")) {
+        return {
+          result: "# Отчет по лабораторной работе\n\n## Введение\nТекст отчета.",
+          usage: {}
+        };
+      }
+
+      // Main orchestrator loop
+      loopCalls++;
+      if (loopCalls === 1) {
+        return {
+          result: "",
+          functionCalls: [
+            {
+              name: "invoke_skill",
+              args: { prompt: "Напиши скрипт парсера на Python", format: "py", filename: "parser.py" }
+            },
+            {
+              name: "invoke_skill",
+              args: { prompt: "Составь отчет по лабораторной работе", format: "docx", isGost: true }
+            }
+          ],
+          usage: {}
+        };
+      }
+
+      return {
+        result: "Лабораторная работа готова! Я сформировал скрипт на Python и отчет в формате Word.",
+        functionCalls: [],
+        usage: {}
+      };
+    }
+  };
+
+  const svc = new OrchestratorService({ db: mockDb, ai: mockAi });
+  const res = await svc.execute({ telegramUserId: 999, text: "Напиши скрипт парсера на Python и отчёт к нему" });
+
+  assert.equal(res.status, "success");
+  assert.equal(res.artifacts.length, 2, "Must produce exactly 2 artifacts in submission package");
+
+  const pyArtifact = res.artifacts.find(a => a.name.endsWith(".py"));
+  const docxArtifact = res.artifacts.find(a => a.name.endsWith(".docx"));
+
+  assert.ok(pyArtifact, "Python code artifact must be present");
+  assert.ok(docxArtifact, "DOCX report artifact must be present");
+  assert.equal(pyArtifact.name, "parser.py");
+  assert.ok(Buffer.isBuffer(pyArtifact.content));
+  assert.ok(!pyArtifact.content.toString("utf-8").includes("```"), "Code artifact must be clean without markdown fences");
+  assert.ok(Buffer.isBuffer(docxArtifact.content));
+  assert.ok(res.response.includes("Лабораторная работа готова"));
+});
+
 
 
 
