@@ -26,8 +26,10 @@ import { Api } from "grammy";
 import { db } from "@mind/db";
 import { connection, queue, PROACTIVE_QUEUE_NAME } from "./queue.js";
 import { processReminderJob, SCAN_REMINDERS_JOB_NAME } from "./reminder.js";
+import { generateDailyDigest, DAILY_DIGEST_JOB_NAME } from "./digest.js";
 
 export * from "./reminder.js";
+export * from "./digest.js";
 export * from "./queue.js";
 
 export interface WorkerInstance {
@@ -54,6 +56,14 @@ export async function startWorker(): Promise<WorkerInstance> {
     async (job) => {
       console.log(`[Proactive Worker] [${new Date().toISOString()}] Processing job "${job.name}" (${job.id})...`);
       try {
+        if (job.name === DAILY_DIGEST_JOB_NAME) {
+          const result = await generateDailyDigest(db, telegramApi);
+          console.log(
+            `[Proactive Worker] [${new Date().toISOString()}] Job "${job.name}" completed: scanned=${result.scanned}, sent=${result.sent}, skipped=${result.skipped}, errors=${result.errors}`
+          );
+          return result;
+        }
+
         const result = await processReminderJob(job, db, telegramApi);
         if (result) {
           console.log(
@@ -79,7 +89,7 @@ export async function startWorker(): Promise<WorkerInstance> {
     console.error("[Proactive Worker] Worker error:", error);
   });
 
-  // Register repeatable task (cron) in Redis
+  // Register repeatable task (cron) in Redis for reminders
   await queue.add(
     SCAN_REMINDERS_JOB_NAME,
     {},
@@ -91,6 +101,20 @@ export async function startWorker(): Promise<WorkerInstance> {
   );
 
   console.log(`[Proactive Worker] Registered repeatable job "${SCAN_REMINDERS_JOB_NAME}" with pattern: "${cronSchedule}"`);
+
+  // Register repeatable task (cron) in Redis for daily morning digest
+  const digestCronSchedule = process.env["DAILY_DIGEST_CRON_SCHEDULE"] || "0 8 * * *";
+  await queue.add(
+    DAILY_DIGEST_JOB_NAME,
+    {},
+    {
+      repeat: {
+        pattern: digestCronSchedule,
+      },
+    }
+  );
+
+  console.log(`[Proactive Worker] Registered repeatable job "${DAILY_DIGEST_JOB_NAME}" with pattern: "${digestCronSchedule}"`);
 
   const close = async () => {
     console.log("[Proactive Worker] Closing worker, queue, and Redis connection...");

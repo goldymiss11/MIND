@@ -330,6 +330,69 @@ export function setupBot(
     }
   });
 
+  // Command: /digest
+  bot.command("digest", async (ctx) => {
+    const fromId = ctx.from?.id;
+    if (!fromId) return;
+
+    try {
+      let userRecords = await database
+        .select()
+        .from(users)
+        .where(eq(users.telegramId, fromId))
+        .limit(1);
+
+      let user = userRecords[0];
+      if (!user && typeof orchestrator.ensureUser === "function") {
+        try {
+          user = await orchestrator.ensureUser(fromId, "digest_command");
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!user) {
+        userRecords = await database
+          .select()
+          .from(users)
+          .where(eq(users.telegramId, fromId))
+          .limit(1);
+        user = userRecords[0];
+      }
+
+      if (!user) {
+        await ctx.reply("Пользователь не найден. Нажмите /start для инициализации.");
+        return;
+      }
+
+      const currentStatus = user.digestEnabled ?? true;
+      const newStatus = !currentStatus;
+
+      await database
+        .update(users)
+        .set({
+          digestEnabled: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
+
+      if (newStatus) {
+        await ctx.reply(
+          "🔔 *Утренняя сводка включена.*\n\nЯ буду присылать план на день каждое утро, если есть важные задачи.",
+          { parse_mode: "Markdown" }
+        );
+      } else {
+        await ctx.reply(
+          "🔕 *Утренняя сводка отключена.*\n\nВы можете включить её снова командой /digest.",
+          { parse_mode: "Markdown" }
+        );
+      }
+    } catch (error) {
+      console.error("Error toggling digest setting:", error);
+      await ctx.reply("Произошла ошибка при переключении утренней сводки. Попробуйте позже.");
+    }
+  });
+
   // Callback query handler for interactive reminder buttons
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
@@ -337,6 +400,31 @@ export function setupBot(
 
     if (!fromId || !data) {
       await ctx.answerCallbackQuery().catch(() => {});
+      return;
+    }
+
+    if (data === "digest:off") {
+      try {
+        await database
+          .update(users)
+          .set({
+            digestEnabled: false,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.telegramId, fromId));
+
+        const replyText = "🔕 Утренняя сводка отключена. Вы можете включить её в настройках или командой /digest.";
+        try {
+          await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+        } catch {
+          // Ignore if reply markup cannot be updated
+        }
+        await ctx.reply(replyText);
+        await ctx.answerCallbackQuery({ text: "Утренняя сводка отключена" });
+      } catch (err) {
+        console.error("Error disabling digest:", err);
+        await ctx.answerCallbackQuery({ text: "Ошибка при отключении сводки" }).catch(() => {});
+      }
       return;
     }
 

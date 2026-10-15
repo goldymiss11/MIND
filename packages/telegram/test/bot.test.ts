@@ -1338,3 +1338,137 @@ test("setupBot: handles photo download failure gracefully without crashing", asy
   }
 });
 
+test("setupBot: handles callback_query digest:off to disable morning digest", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  let updatedDigestEnabled: boolean | null = null;
+
+  const mockDb: any = {
+    update: () => ({
+      set: (values: any) => {
+        updatedDigestEnabled = values.digestEnabled;
+        return {
+          where: async () => [{ id: "user-1", telegramId: 112233 }],
+        };
+      },
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: true as any };
+  });
+
+  await bot.handleUpdate({
+    update_id: 116,
+    callback_query: {
+      id: "cb-digest-off",
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      message: {
+        message_id: 88,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 998877, type: "private" },
+        text: "🌅 *План на день*",
+      },
+      chat_instance: "inst-digest",
+      data: "digest:off",
+    },
+  } as any);
+
+  assert.equal(updatedDigestEnabled, false);
+
+  const replyCall = outboundCalls.find(
+    (c) => c.method === "sendMessage" && c.payload.text.includes("Утренняя сводка отключена")
+  );
+  assert.ok(replyCall, "Should reply with opt-out confirmation");
+
+  const answerCall = outboundCalls.find(
+    (c) => c.method === "answerCallbackQuery" && c.payload.text === "Утренняя сводка отключена"
+  );
+  assert.ok(answerCall, "Should answer callback query with popup alert");
+});
+
+test("setupBot: handles /digest command to toggle digestEnabled setting", async () => {
+  const mockOrchestrator: MessageHandler = {
+    handleIncomingMessage: async () => ({ text: "ok" }),
+  };
+
+  let currentEnabled = true;
+  let updatedEnabled: boolean | null = null;
+
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            { id: "user-1", telegramId: 112233, digestEnabled: currentEnabled },
+          ],
+        }),
+      }),
+    }),
+    update: () => ({
+      set: (values: any) => {
+        updatedEnabled = values.digestEnabled;
+        currentEnabled = values.digestEnabled;
+        return {
+          where: async () => [{ id: "user-1" }],
+        };
+      },
+    }),
+  };
+
+  const bot = setupBot("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", mockOrchestrator, {
+    botInfo: testBotInfo,
+    database: mockDb,
+  });
+
+  const outboundCalls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    outboundCalls.push({ method, payload });
+    return { ok: true, result: { message_id: 301 } as any };
+  });
+
+  // 1. First invocation: toggles from true to false
+  await bot.handleUpdate({
+    update_id: 117,
+    message: {
+      message_id: 91,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/digest",
+      entities: [{ type: "bot_command", offset: 0, length: 7 }],
+    },
+  } as any);
+
+  assert.equal(updatedEnabled, false);
+  const msg1 = outboundCalls[0]?.payload.text;
+  assert.ok(msg1.includes("Утренняя сводка отключена"));
+
+  // 2. Second invocation: toggles from false to true
+  await bot.handleUpdate({
+    update_id: 118,
+    message: {
+      message_id: 92,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text: "/digest",
+      entities: [{ type: "bot_command", offset: 0, length: 7 }],
+    },
+  } as any);
+
+  assert.equal(updatedEnabled, true);
+  const msg2 = outboundCalls[1]?.payload.text;
+  assert.ok(msg2.includes("Утренняя сводка включена"));
+});
+
+
