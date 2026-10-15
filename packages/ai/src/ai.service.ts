@@ -62,7 +62,12 @@ export class AiService {
     if (
       status === 429 || status === "429" || status === "RESOURCE_EXHAUSTED" || message.includes("429") || message.includes("RESOURCE_EXHAUSTED")
     ) {
-      if (message.toLowerCase().includes("quota")) {
+      if (
+        message.toLowerCase().includes("daily") ||
+        message.toLowerCase().includes("per day") ||
+        message.toLowerCase().includes("insufficient_quota") ||
+        status === 402
+      ) {
         return ProviderErrorCode.QUOTA_EXCEEDED;
       }
       return ProviderErrorCode.RATE_LIMITED;
