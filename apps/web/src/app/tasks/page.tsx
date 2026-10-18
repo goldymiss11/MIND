@@ -109,17 +109,22 @@ export default function TasksPage() {
 
   if (!isReady || loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="w-8 h-8 border-4 border-[#2481cc] border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex items-center justify-center min-h-screen bg-[#000000]">
+        <div className="w-8 h-8 border-3 border-[#007aff] border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center">
-        <p className="text-red-500 mb-4">{error}</p>
-        <button onClick={loadTasks} className="px-4 py-2 bg-[#2481cc] text-white rounded-xl">Retry</button>
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center bg-[#000000]">
+        <p className="text-rose-400 mb-4 text-sm">{error}</p>
+        <button
+          onClick={loadTasks}
+          className="px-5 py-2.5 bg-[#007aff] hover:bg-[#007aff]/90 text-white font-medium rounded-2xl text-sm"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -147,74 +152,86 @@ export default function TasksPage() {
     return true;
   });
 
+  const filterTabs: Array<{ id: "All" | "Today" | "Upcoming" | "Completed"; label: string }> = [
+    { id: "All", label: "Все" },
+    { id: "Today", label: "Сегодня" },
+    { id: "Upcoming", label: "Скоро" },
+    { id: "Completed", label: "Готово" },
+  ];
+
   return (
-    <main className="p-4 flex flex-col gap-4 min-h-screen pb-24">
-      <header className="mt-2 mb-2 flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-white">Tasks</h1>
+    <main className="p-4 flex flex-col gap-4 min-h-screen bg-[#000000] text-white pb-24">
+      <header className="mt-2 mb-1 flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-white tracking-tight">Задачи</h1>
         <button
           onClick={() => setIsModalOpen(true)}
-          className="bg-[#2481cc] text-white p-2 rounded-2xl flex items-center gap-1.5 px-3.5 text-xs font-semibold active:scale-95 transition-transform"
+          className="bg-[#007aff] hover:bg-[#007aff]/90 text-white py-2 px-3.5 rounded-2xl flex items-center gap-1.5 text-xs font-semibold active:scale-95 transition-all shadow-sm"
         >
-          <Plus size={16} /> New Task
+          <Plus size={16} strokeWidth={2.5} /> Новая задача
         </button>
       </header>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-2 mb-2 overflow-x-auto pb-1 no-scrollbar">
-        {(["All", "Today", "Upcoming", "Completed"] as const).map((filter) => {
-          const isActive = activeFilter === filter;
+      {/* Segmented Filter Controls */}
+      <div className="bg-[#1c1c1e] p-1 rounded-2xl flex gap-1">
+        {filterTabs.map((tab) => {
+          const isActive = activeFilter === tab.id;
           return (
             <button
-              key={filter}
-              onClick={() => setActiveFilter(filter)}
-              className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors ${
+              key={tab.id}
+              onClick={() => setActiveFilter(tab.id)}
+              className={`flex-1 py-1.5 text-xs font-medium rounded-xl transition-all ${
                 isActive
-                  ? "bg-[#2481cc] text-white font-medium"
-                  : "bg-[#1c1c1d] text-[#999999] hover:text-white"
+                  ? "bg-[#2c2c2e] text-white shadow-sm"
+                  : "text-[#8e8e93] hover:text-white"
               }`}
             >
-              {filter}
+              {tab.label}
             </button>
           );
         })}
       </div>
 
-      {/* Task List */}
-      <div className="flex flex-col gap-3">
+      {/* Task List: Grouped Container */}
+      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden">
         {filteredTasks.length > 0 ? (
           filteredTasks.map((task) => (
-            <div key={task.id} className="bg-[#1c1c1d] p-4 rounded-2xl flex items-start gap-3 border border-white/5">
+            <div
+              key={task.id}
+              className="p-4 flex items-start gap-3 hover:bg-white/[0.02] transition-colors"
+            >
               <button
                 onClick={() => toggleTask(task.id, task.status)}
                 className="mt-0.5 shrink-0 transition-transform active:scale-90"
               >
                 {task.status === "completed" ? (
-                  <CheckCircle2 size={24} className="text-[#2481cc]" />
+                  <CheckCircle2 size={22} className="text-[#30d158]" />
                 ) : (
-                  <Circle size={24} className="text-[#999999] hover:text-white" />
+                  <Circle size={22} className="text-[#8e8e93] hover:text-[#007aff]" />
                 )}
               </button>
               <div className="flex-1 overflow-hidden">
                 <h3
                   className={`text-[15px] font-medium leading-tight mb-1 ${
-                    task.status === "completed" ? "text-[#999999] line-through" : "text-white"
+                    task.status === "completed" ? "text-[#8e8e93] line-through" : "text-white"
                   }`}
                 >
                   {task.title}
                 </h3>
                 {task.description && (
-                  <p className="text-[#999999] text-xs line-clamp-2 mb-2">{task.description}</p>
+                  <p className="text-[#8e8e93] text-xs line-clamp-2 mb-2 leading-relaxed">
+                    {task.description}
+                  </p>
                 )}
-                <div className="flex items-center gap-3 mt-1.5">
+                <div className="flex items-center gap-2.5 mt-1.5">
                   {task.deadline && (
-                    <div className="flex items-center gap-1 text-[#2481cc] text-xs font-medium">
+                    <div className="flex items-center gap-1 text-[#007aff] text-xs font-medium">
                       <Clock size={12} />
                       <span>{new Date(task.deadline).toLocaleDateString()}</span>
                     </div>
                   )}
                   {task.priority === "high" && (
-                    <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-md">
-                      High
+                    <span className="text-[10px] font-bold text-rose-400 bg-rose-500/15 px-2 py-0.5 rounded-full">
+                      Высокий
                     </span>
                   )}
                 </div>
@@ -226,23 +243,23 @@ export default function TasksPage() {
                     deleteTask(task.id);
                   }
                 }}
-                className="text-[#888] hover:text-rose-400 active:text-rose-400 p-2.5 rounded-xl hover:bg-rose-500/10 active:bg-rose-500/20 transition-all shrink-0 -mr-1"
+                className="text-[#8e8e93] hover:text-rose-400 active:text-rose-400 p-2 rounded-xl hover:bg-rose-500/10 transition-all shrink-0"
                 aria-label="Delete task"
                 title="Удалить задачу"
               >
-                <Trash2 size={18} />
+                <Trash2 size={16} />
               </button>
             </div>
           ))
         ) : (
-          <div className="text-center text-[#999999] py-12 bg-[#1c1c1d]/30 rounded-2xl border border-white/5">
-            <p className="text-sm">No tasks in this view</p>
+          <div className="text-center text-[#8e8e93] py-12 px-4">
+            <p className="text-sm font-medium">В этом списке нет задач</p>
             {activeFilter !== "All" && (
               <button
                 onClick={() => setActiveFilter("All")}
-                className="text-[#2481cc] text-xs font-medium mt-2"
+                className="text-[#007aff] text-xs font-semibold mt-2 hover:underline"
               >
-                Show all tasks
+                Показать все задачи
               </button>
             )}
           </div>
@@ -251,76 +268,79 @@ export default function TasksPage() {
 
       {/* New Task Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
           <div className="bg-[#1c1c1e] w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 border border-white/10 shadow-2xl flex flex-col gap-4">
             <div className="flex justify-between items-center">
-              <h2 className="text-lg font-bold text-white">New Task</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-[#999] hover:text-white p-1">
+              <h2 className="text-lg font-bold text-white">Новая задача</h2>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-[#8e8e93] hover:text-white p-1 rounded-full transition-colors"
+              >
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={handleCreateTask} className="flex flex-col gap-3">
               <div>
-                <label className="text-xs text-[#999] mb-1 block">Title *</label>
+                <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Название *</label>
                 <input
                   type="text"
                   required
-                  placeholder="What needs to be done?"
+                  placeholder="Что нужно сделать?"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-[#2c2c2e] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2481cc]"
+                  className="w-full bg-[#2c2c2e] text-white rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff] placeholder-[#8e8e93]"
                 />
               </div>
 
               <div>
-                <label className="text-xs text-[#999] mb-1 block">Description</label>
+                <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Описание (необязательно)</label>
                 <textarea
                   rows={2}
-                  placeholder="Notes or context..."
+                  placeholder="Заметки или контекст..."
                   value={desc}
                   onChange={(e) => setDesc(e.target.value)}
-                  className="w-full bg-[#2c2c2e] text-white rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#2481cc] resize-none"
+                  className="w-full bg-[#2c2c2e] text-white rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff] placeholder-[#8e8e93] resize-none"
                 />
               </div>
 
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="text-xs text-[#999] mb-1 block">Deadline</label>
+                  <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Дедлайн</label>
                   <input
                     type="date"
                     value={deadline}
                     onChange={(e) => setDeadline(e.target.value)}
-                    className="w-full bg-[#2c2c2e] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#2481cc]"
+                    className="w-full bg-[#2c2c2e] text-white rounded-2xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff]"
                   />
                 </div>
                 <div className="flex-1">
-                  <label className="text-xs text-[#999] mb-1 block">Priority</label>
+                  <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Приоритет</label>
                   <select
                     value={priority}
                     onChange={(e) => setPriority(e.target.value as any)}
-                    className="w-full bg-[#2c2c2e] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#2481cc]"
+                    className="w-full bg-[#2c2c2e] text-white rounded-2xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff]"
                   >
-                    <option value="normal">Normal</option>
-                    <option value="high">High</option>
+                    <option value="normal">Обычный</option>
+                    <option value="high">Высокий</option>
                   </select>
                 </div>
               </div>
 
-              <div className="flex gap-2 mt-3">
+              <div className="flex gap-2.5 mt-3">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 py-2.5 bg-[#2c2c2e] text-white rounded-xl text-sm font-medium"
+                  className="flex-1 py-3 bg-[#2c2c2e] hover:bg-[#38383a] text-white rounded-2xl text-sm font-medium transition-colors"
                 >
-                  Cancel
+                  Отмена
                 </button>
                 <button
                   type="submit"
                   disabled={saving || !title.trim()}
-                  className="flex-1 py-2.5 bg-[#2481cc] text-white rounded-xl text-sm font-medium disabled:opacity-50"
+                  className="flex-1 py-3 bg-[#007aff] hover:bg-[#007aff]/90 text-white rounded-2xl text-sm font-semibold disabled:opacity-50 transition-colors"
                 >
-                  {saving ? "Saving..." : "Create Task"}
+                  {saving ? "Сохранение..." : "Создать задачу"}
                 </button>
               </div>
             </form>
@@ -330,3 +350,4 @@ export default function TasksPage() {
     </main>
   );
 }
+

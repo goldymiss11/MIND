@@ -9,27 +9,32 @@ export default function SettingsPage() {
   if (!isReady) return null;
 
   return (
-    <main className="p-4 flex flex-col gap-4 min-h-screen pb-24">
-      <header className="mt-2 mb-2">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Settings size={28} className="text-[#2481cc]" /> Settings
+    <main className="p-4 flex flex-col gap-4 min-h-screen bg-[#000000] text-white pb-24">
+      <header className="mt-2 mb-1">
+        <h1 className="text-2xl font-bold flex items-center gap-2 text-white tracking-tight">
+          <Settings size={26} className="text-[#007aff]" /> Настройки
         </h1>
       </header>
 
-      <div className="bg-[#1c1c1d] rounded-2xl p-4 flex flex-col gap-4">
-        <div className="flex items-center gap-3 border-b border-white/10 pb-4">
-          <div className="w-12 h-12 bg-[#2481cc] rounded-full flex items-center justify-center text-white text-lg font-bold">
-            {user?.first_name?.charAt(0) || 'U'}
+      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden">
+        <div className="p-4 flex items-center gap-3.5">
+          <div className="w-12 h-12 bg-[#007aff] rounded-full flex items-center justify-center text-white text-lg font-bold shadow-md">
+            {user?.first_name?.charAt(0) || "U"}
           </div>
           <div>
-            <h2 className="text-white font-medium">{user?.first_name} {user?.last_name}</h2>
-            <p className="text-[#999999] text-sm">@{user?.username || 'user'}</p>
+            <h2 className="text-white font-semibold text-[15px]">
+              {user?.first_name} {user?.last_name}
+            </h2>
+            <p className="text-[#8e8e93] text-xs mt-0.5">@{user?.username || "user"}</p>
           </div>
         </div>
 
-        <button className="flex items-center gap-3 text-red-500 py-2" onClick={close}>
-          <LogOut size={20} />
-          <span>Close Mini App</span>
+        <button
+          className="w-full p-4 flex items-center gap-3 text-rose-400 hover:bg-rose-500/10 active:bg-rose-500/20 transition-colors text-sm font-medium"
+          onClick={close}
+        >
+          <LogOut size={18} />
+          <span>Закрыть Mini App</span>
         </button>
       </div>
     </main>

@@ -20,8 +20,8 @@ export function Navigation() {
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4 pt-2">
-      <div className="bg-[#1c1c1d]/90 backdrop-blur-md rounded-3xl flex justify-around items-center p-2 shadow-lg">
+    <div className="fixed bottom-4 left-4 right-4 z-50">
+      <div className="bg-[#1c1c1e]/90 backdrop-blur-xl border border-white/10 rounded-full px-3 py-2 flex justify-around items-center shadow-2xl">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           const Icon = item.icon;
@@ -29,14 +29,14 @@ export function Navigation() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center justify-center w-16 h-14 rounded-2xl transition-colors ${
-                isActive ? "text-[#2481cc]" : "text-[#999999] hover:text-white"
+              className={`transition-all ${
+                isActive
+                  ? "bg-white/10 text-[#007aff] rounded-full px-3.5 py-1.5 flex flex-col items-center"
+                  : "text-[#8e8e93] hover:text-white flex flex-col items-center py-1.5 px-2"
               }`}
             >
-              <div className={`p-1 ${isActive ? 'bg-[#2481cc]/20 rounded-full' : ''}`}>
-                <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
-              </div>
-              <span className="text-[10px] mt-1 font-medium">{item.label}</span>
+              <Icon size={20} strokeWidth={isActive ? 2.4 : 2} />
+              <span className="text-[10px] font-medium mt-0.5">{item.label}</span>
             </Link>
           );
         })}
