@@ -12,35 +12,71 @@ export function Navigation() {
   }
 
   const navItems = [
-    { href: "/", label: "Home", icon: Home },
-    { href: "/tasks", label: "Tasks", icon: CheckSquare },
-    { href: "/memory", label: "Memory", icon: Brain },
-    { href: "/artifacts", label: "Artifacts", icon: FileText },
-    { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/", label: "Главная", icon: Home },
+    { href: "/tasks", label: "Задачи", icon: CheckSquare },
+    { href: "/memory", label: "Память", icon: Brain },
+    { href: "/artifacts", label: "Файлы", icon: FileText },
+    { href: "/settings", label: "Настройки", icon: Settings },
   ];
 
+  const handleTabClick = () => {
+    if (typeof window !== "undefined" && window.Telegram?.WebApp?.HapticFeedback) {
+      try {
+        window.Telegram.WebApp.HapticFeedback.selectionChanged();
+      } catch {
+        // Safe ignore
+      }
+    }
+  };
+
   return (
-    <div className="fixed bottom-4 left-4 right-4 z-50">
-      <div className="bg-[#1c1c1e]/90 backdrop-blur-xl border border-white/10 rounded-full px-3 py-2 flex justify-around items-center shadow-2xl">
+    <nav
+      aria-label="Основная навигация"
+      className="fixed bottom-4 sm:bottom-6 inset-x-0 mx-auto w-[calc(100%-1.5rem)] max-w-[400px] z-50 pointer-events-none pb-[env(safe-area-inset-bottom,0px)]"
+    >
+      <div className="pointer-events-auto relative rounded-full p-1.5 flex justify-between items-center glass-dock transition-all">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           const Icon = item.icon;
+
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`transition-all ${
+              onClick={handleTabClick}
+              className={`relative flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-full transition-all duration-200 select-none ${
                 isActive
-                  ? "bg-white/10 text-[#007aff] rounded-full px-3.5 py-1.5 flex flex-col items-center"
-                  : "text-[#8e8e93] hover:text-white flex flex-col items-center py-1.5 px-2"
+                  ? "glass-pill-active text-[#007aff]"
+                  : "text-[#8e8e93] hover:text-white/95 hover:bg-white/[0.04] active:scale-92 active:opacity-75"
               }`}
             >
-              <Icon size={20} strokeWidth={isActive ? 2.4 : 2} />
-              <span className="text-[10px] font-medium mt-0.5">{item.label}</span>
+              <div className="relative flex items-center justify-center">
+                {isActive && (
+                  <div
+                    aria-hidden="true"
+                    className="absolute -inset-1.5 bg-[#007aff]/30 blur-sm rounded-full pointer-events-none"
+                  />
+                )}
+                <Icon
+                  size={20}
+                  strokeWidth={isActive ? 2.4 : 1.9}
+                  className={`relative transition-transform duration-200 ${
+                    isActive ? "scale-105 text-[#007aff]" : "text-[#8e8e93]"
+                  }`}
+                />
+              </div>
+              <span
+                className={`text-[10px] tracking-tight mt-1 leading-none select-none transition-colors duration-200 ${
+                  isActive ? "text-[#007aff] font-semibold" : "text-[#8e8e93] font-medium"
+                }`}
+              >
+                {item.label}
+              </span>
             </Link>
           );
         })}
       </div>
-    </div>
+    </nav>
   );
 }
+

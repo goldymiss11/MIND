@@ -21,11 +21,8 @@ export default function TasksPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (isReady && initData) {
+    if (isReady) {
       loadTasks();
-    } else if (isReady && !initData) {
-      setError("Please open this app inside Telegram");
-      setLoading(false);
     }
   }, [isReady, initData]);
 
@@ -33,10 +30,85 @@ export default function TasksPage() {
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchWithAuth("/api/tasks?all=true");
-      setTasks(Array.isArray(result) ? result : (result?.data ?? []));
+      if (initData) {
+        const result = await fetchWithAuth("/api/tasks?all=true");
+        setTasks(Array.isArray(result) ? result : (result?.data ?? []));
+      } else {
+        // Fallback preview tasks
+        setTasks([
+          {
+            id: "1",
+            title: "Сдать курсовую по дискретной математике",
+            description: "Оформить список литературы по ГОСТу и прикрепить титульный лист",
+            deadline: new Date(Date.now() + 86400000 * 2).toISOString(),
+            priority: "high",
+            status: "in_progress",
+          },
+          {
+            id: "2",
+            title: "Подготовить презентацию для демо-дня",
+            description: "Слайды 1-10 с архитектурой агентов и памятью",
+            deadline: new Date(Date.now() + 86400000 * 5).toISOString(),
+            priority: "normal",
+            status: "in_progress",
+          },
+          {
+            id: "3",
+            title: "Обсудить рефакторинг Fastify API",
+            description: "Согласовать структуру пакетов и схемы валидации",
+            deadline: new Date().toISOString(),
+            priority: "normal",
+            status: "in_progress",
+          },
+          {
+            id: "4",
+            title: "Купить авиабилеты на конференцию",
+            description: "Проверить прямые рейсы",
+            deadline: null,
+            priority: "normal",
+            status: "completed",
+          },
+        ]);
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to load tasks");
+      if (!initData) {
+        setTasks([
+          {
+            id: "1",
+            title: "Сдать курсовую по дискретной математике",
+            description: "Оформить список литературы по ГОСТу и прикрепить титульный лист",
+            deadline: new Date(Date.now() + 86400000 * 2).toISOString(),
+            priority: "high",
+            status: "in_progress",
+          },
+          {
+            id: "2",
+            title: "Подготовить презентацию для демо-дня",
+            description: "Слайды 1-10 с архитектурой агентов и памятью",
+            deadline: new Date(Date.now() + 86400000 * 5).toISOString(),
+            priority: "normal",
+            status: "in_progress",
+          },
+          {
+            id: "3",
+            title: "Обсудить рефакторинг Fastify API",
+            description: "Согласовать структуру пакетов и схемы валидации",
+            deadline: new Date().toISOString(),
+            priority: "normal",
+            status: "in_progress",
+          },
+          {
+            id: "4",
+            title: "Купить авиабилеты на конференцию",
+            description: "Проверить прямые рейсы",
+            deadline: null,
+            priority: "normal",
+            status: "completed",
+          },
+        ]);
+      } else {
+        setError(err.message || "Failed to load tasks");
+      }
     } finally {
       setLoading(false);
     }
@@ -172,16 +244,16 @@ export default function TasksPage() {
       </header>
 
       {/* Segmented Filter Controls */}
-      <div className="bg-[#1c1c1e] p-1 rounded-2xl flex gap-1">
+      <div className="bg-[#1c1c1e] p-1 rounded-2xl flex gap-1 border border-white/5 shadow-sm">
         {filterTabs.map((tab) => {
           const isActive = activeFilter === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveFilter(tab.id)}
-              className={`flex-1 py-1.5 text-xs font-medium rounded-xl transition-all ${
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-xl transition-all ${
                 isActive
-                  ? "bg-[#2c2c2e] text-white shadow-sm"
+                  ? "bg-[#2c2c2e] text-white shadow-sm border border-white/5"
                   : "text-[#8e8e93] hover:text-white"
               }`}
             >
@@ -192,7 +264,7 @@ export default function TasksPage() {
       </div>
 
       {/* Task List: Grouped Container */}
-      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden">
+      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden border border-white/5 shadow-sm">
         {filteredTasks.length > 0 ? (
           filteredTasks.map((task) => (
             <div

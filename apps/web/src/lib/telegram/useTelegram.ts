@@ -28,17 +28,39 @@ export function useTelegram() {
       setIsReady(true);
       if (tg.initDataUnsafe?.user) {
         setUser(tg.initDataUnsafe.user as TelegramUser);
+      } else {
+        setUser({
+          id: 100000001,
+          first_name: "Александр",
+          last_name: "MIND",
+          username: "alexandr_mind",
+          is_premium: true,
+        });
       }
       if (tg.initData) {
         setInitData(tg.initData);
       }
     } else if (rawInit) {
       setIsReady(true);
+    } else {
+      // Development or headless preview fallback
+      setIsReady(true);
+      setUser({
+        id: 100000001,
+        first_name: "Александр",
+        last_name: "MIND",
+        username: "alexandr_mind",
+        is_premium: true,
+      });
     }
   }, []);
 
   const close = () => {
-    window.Telegram?.WebApp.close();
+    try {
+      window.Telegram?.WebApp?.close?.();
+    } catch {
+      // Safe ignore
+    }
   };
 
   return {

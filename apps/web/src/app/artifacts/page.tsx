@@ -13,12 +13,11 @@ export default function ArtifactsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedArtifact, setSelectedArtifact] = useState<any | null>(null);
 
+  const [activeCategory, setActiveCategory] = useState<string>("all");
+
   useEffect(() => {
-    if (isReady && initData) {
+    if (isReady) {
       loadArtifacts();
-    } else if (isReady && !initData) {
-      setError("Please open this app inside Telegram");
-      setLoading(false);
     }
   }, [isReady, initData]);
 
@@ -26,10 +25,77 @@ export default function ArtifactsPage() {
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchWithAuth("/api/miniapp/artifacts", initData);
-      setArtifacts(Array.isArray(result) ? result : (result?.data ?? []));
+      if (initData) {
+        const result = await fetchWithAuth("/api/miniapp/artifacts", initData);
+        setArtifacts(Array.isArray(result) ? result : (result?.data ?? []));
+      } else {
+        // Fallback preview artifacts
+        setArtifacts([
+          {
+            id: "1",
+            name: "Отчет_по_проекту_MIND.docx",
+            type: "docx",
+            createdAt: new Date().toISOString(),
+            content: "# Отчет по проекту MIND\n\nПерсональная операционная система ИИ в Telegram.",
+          },
+          {
+            id: "2",
+            name: "Презентация_MIND_OS.pptx",
+            type: "pptx",
+            createdAt: new Date(Date.now() - 86400000).toISOString(),
+            content: null,
+          },
+          {
+            id: "3",
+            name: "План_расходов_Q4.xlsx",
+            type: "xlsx",
+            createdAt: new Date(Date.now() - 172800000).toISOString(),
+            content: null,
+          },
+          {
+            id: "4",
+            name: "Курсовая_дискретная_математика.pdf",
+            type: "pdf",
+            createdAt: new Date(Date.now() - 259200000).toISOString(),
+            content: null,
+          },
+          {
+            id: "5",
+            name: "orchestrator_schema.ts",
+            type: "code",
+            createdAt: new Date(Date.now() - 345600000).toISOString(),
+            content: "export interface OrchestratorPlan {\n  goal: string;\n  tasks: Task[];\n}",
+          },
+        ]);
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to load artifacts");
+      if (!initData) {
+        setArtifacts([
+          {
+            id: "1",
+            name: "Отчет_по_проекту_MIND.docx",
+            type: "docx",
+            createdAt: new Date().toISOString(),
+            content: "# Отчет по проекту MIND\n\nПерсональная операционная система ИИ в Telegram.",
+          },
+          {
+            id: "2",
+            name: "Презентация_MIND_OS.pptx",
+            type: "pptx",
+            createdAt: new Date(Date.now() - 86400000).toISOString(),
+            content: null,
+          },
+          {
+            id: "3",
+            name: "План_расходов_Q4.xlsx",
+            type: "xlsx",
+            createdAt: new Date(Date.now() - 172800000).toISOString(),
+            content: null,
+          },
+        ]);
+      } else {
+        setError(err.message || "Failed to load artifacts");
+      }
     } finally {
       setLoading(false);
     }
@@ -73,9 +139,32 @@ export default function ArtifactsPage() {
     );
   }
 
-  const filteredArtifacts = artifacts.filter((a) =>
-    searchQuery ? a.name?.toLowerCase().includes(searchQuery.toLowerCase()) : true
-  );
+  const categories = [
+    { id: "all", label: "Все" },
+    { id: "docx", label: "DOCX" },
+    { id: "pptx", label: "PPTX" },
+    { id: "xlsx", label: "XLSX" },
+    { id: "pdf", label: "PDF" },
+    { id: "code", label: "Код" },
+  ];
+
+  const filteredArtifacts = artifacts.filter((a) => {
+    const matchesSearch = searchQuery
+      ? a.name?.toLowerCase().includes(searchQuery.toLowerCase())
+      : true;
+    const matchesCategory =
+      activeCategory === "all" ? true : a.type?.toLowerCase() === activeCategory.toLowerCase();
+    return matchesSearch && matchesCategory;
+  });
+
+  const getFormatBadge = (type?: string) => {
+    const t = (type || "doc").toLowerCase();
+    if (t === "docx" || t === "doc") return { bg: "bg-[#007aff]/15", text: "text-[#007aff]" };
+    if (t === "xlsx" || t === "csv") return { bg: "bg-[#30d158]/15", text: "text-[#30d158]" };
+    if (t === "pptx" || t === "ppt") return { bg: "bg-[#ff9500]/15", text: "text-[#ff9500]" };
+    if (t === "pdf") return { bg: "bg-rose-500/15", text: "text-rose-400" };
+    return { bg: "bg-[#af52de]/15", text: "text-[#af52de]" };
+  };
 
   return (
     <main className="p-4 flex flex-col gap-4 min-h-screen bg-[#000000] text-white pb-24">
@@ -95,7 +184,7 @@ export default function ArtifactsPage() {
           placeholder="Поиск файлов и отчетов..." 
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full bg-[#1c1c1e] text-white placeholder-[#8e8e93] rounded-2xl pl-10 pr-10 py-3 border-none focus:outline-none focus:ring-1 focus:ring-[#007aff] text-sm transition-shadow"
+          className="w-full bg-[#1c1c1e] text-white placeholder-[#8e8e93] rounded-2xl pl-10 pr-10 py-3 border border-white/5 focus:outline-none focus:ring-1 focus:ring-[#007aff] text-sm transition-shadow shadow-sm"
         />
         {searchQuery && (
           <button
@@ -107,35 +196,57 @@ export default function ArtifactsPage() {
         )}
       </div>
 
-      {/* Artifacts List: Grouped Container */}
-      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden">
-        {filteredArtifacts.length > 0 ? (
-          filteredArtifacts.map((a) => (
-            <div
-              key={a.id}
-              className="p-4 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors"
+      {/* Category Pills (Horizontal Scroll) */}
+      <div className="flex gap-2 overflow-x-auto no-scrollbar py-0.5">
+        {categories.map((cat) => {
+          const isActive = activeCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              onClick={() => setActiveCategory(cat.id)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                isActive
+                  ? "bg-[#007aff] text-white shadow-sm"
+                  : "bg-[#1c1c1e] text-[#8e8e93] hover:text-white border border-white/5"
+              }`}
             >
+              {cat.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Artifacts List: Grouped Container */}
+      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden border border-white/5 shadow-sm">
+        {filteredArtifacts.length > 0 ? (
+          filteredArtifacts.map((a) => {
+            const badge = getFormatBadge(a.type);
+            return (
               <div
-                onClick={() => setSelectedArtifact(a)}
-                className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                key={a.id}
+                className="p-4 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors"
               >
-                <div className="w-10 h-10 rounded-full bg-[#ff9500]/20 text-[#ff9500] flex items-center justify-center shrink-0">
-                  <FileText size={20} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-white text-[15px] font-medium truncate hover:text-[#007aff] transition-colors">
-                    {a.name}
-                  </p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] font-bold uppercase text-[#ff9500] bg-[#ff9500]/15 px-2 py-0.5 rounded-full">
-                      {a.type || "DOC"}
-                    </span>
-                    <span className="text-xs text-[#8e8e93]">
-                      {a.createdAt ? new Date(a.createdAt).toLocaleDateString() : ""}
-                    </span>
+                <div
+                  onClick={() => setSelectedArtifact(a)}
+                  className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                >
+                  <div className={`w-10 h-10 rounded-full ${badge.bg} ${badge.text} flex items-center justify-center shrink-0`}>
+                    <FileText size={20} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-white text-[15px] font-medium truncate hover:text-[#007aff] transition-colors">
+                      {a.name}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className={`text-[10px] font-bold uppercase ${badge.bg} ${badge.text} px-2 py-0.5 rounded-full`}>
+                        {a.type || "DOC"}
+                      </span>
+                      <span className="text-xs text-[#8e8e93]">
+                        {a.createdAt ? new Date(a.createdAt).toLocaleDateString() : ""}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
               <div className="flex items-center gap-1.5 shrink-0 ml-2">
                 <button
@@ -154,7 +265,7 @@ export default function ArtifactsPage() {
                 </button>
               </div>
             </div>
-          ))
+          )})
         ) : (
           <div className="text-center text-[#8e8e93] py-12 px-4">
             <p className="text-sm font-medium">Файлы пока не созданы</p>

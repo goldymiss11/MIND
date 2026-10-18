@@ -25,7 +25,7 @@ export default function RootLayout({
       <head>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
       </head>
-      <body className="pb-24 font-sans bg-[#000000] text-white">
+      <body className="min-h-screen pb-28 sm:pb-32 font-sans bg-[#000000] text-white selection:bg-[#007aff]/30 antialiased">
         {children}
         <Navigation />
       </body>

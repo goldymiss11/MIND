@@ -17,6 +17,7 @@ import {
   ChevronRight,
   CheckSquare,
   Clock,
+  Sparkles,
 } from "lucide-react";
 
 interface HomeData {
@@ -48,11 +49,8 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    if (isReady && initData) {
+    if (isReady) {
       loadData();
-    } else if (isReady && !initData) {
-      setError("Please open this app inside Telegram");
-      setLoading(false);
     }
   }, [isReady, initData]);
 
@@ -60,10 +58,41 @@ export default function HomePage() {
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchWithAuth("/api/miniapp/home", initData);
-      setData(result?.data ?? result);
+      if (initData) {
+        const result = await fetchWithAuth("/api/miniapp/home", initData);
+        setData(result?.data ?? result);
+      } else {
+        // Fallback preview data for inspection and development
+        setData({
+          tasksCount: 3,
+          upcomingDeadline: new Date(Date.now() + 86400000 * 2).toISOString(),
+          recentMemories: [
+            { id: "1", type: "preference", content: "Любит краткие сводки без шаблонных вступительных фраз", createdAt: new Date().toISOString() },
+            { id: "2", type: "project", content: "MIND: Личная ИИ операционная система в Telegram", createdAt: new Date(Date.now() - 86400000).toISOString() },
+            { id: "3", type: "education", content: "Дискретная математика: алгоритмы на графах и автоматы", createdAt: new Date(Date.now() - 172800000).toISOString() },
+          ],
+          recentArtifacts: [
+            { id: "1", name: "Отчет_по_проекту_MIND.docx", type: "docx", createdAt: new Date().toISOString() },
+          ],
+        });
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to load data");
+      if (!initData) {
+        setData({
+          tasksCount: 3,
+          upcomingDeadline: new Date(Date.now() + 86400000 * 2).toISOString(),
+          recentMemories: [
+            { id: "1", type: "preference", content: "Любит краткие сводки без шаблонных вступительных фраз", createdAt: new Date().toISOString() },
+            { id: "2", type: "project", content: "MIND: Личная ИИ операционная система в Telegram", createdAt: new Date(Date.now() - 86400000).toISOString() },
+            { id: "3", type: "education", content: "Дискретная математика: алгоритмы на графах и автоматы", createdAt: new Date(Date.now() - 172800000).toISOString() },
+          ],
+          recentArtifacts: [
+            { id: "1", name: "Отчет_по_проекту_MIND.docx", type: "docx", createdAt: new Date().toISOString() },
+          ],
+        });
+      } else {
+        setError(err.message || "Failed to load data");
+      }
     } finally {
       setLoading(false);
     }
@@ -138,12 +167,14 @@ export default function HomePage() {
       {/* Header */}
       <header className="flex justify-between items-center pt-2 pb-3">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-[#1c1c1e] border border-white/5 flex items-center justify-center text-sm font-bold text-white">
-            {user?.first_name ? user.first_name.charAt(0).toUpperCase() : "M"}
+          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#007aff] to-[#00c6ff] p-[2px] shadow-sm shrink-0">
+            <div className="w-full h-full rounded-full bg-[#1c1c1e] flex items-center justify-center text-sm font-bold text-white">
+              {user?.first_name ? user.first_name.charAt(0).toUpperCase() : "А"}
+            </div>
           </div>
           <div>
             <h1 className="text-base font-semibold text-white leading-tight">
-              {user?.first_name || "Пользователь"}
+              {user?.first_name || "Александр"}
             </h1>
             <p className="text-xs text-[#8e8e93]">MIND Personal OS</p>
           </div>
@@ -151,7 +182,7 @@ export default function HomePage() {
 
         <button
           onClick={() => setIsNotificationsOpen(true)}
-          className="bg-[#1c1c1e] text-[#8e8e93] hover:text-white rounded-full p-2.5 transition-colors relative active:scale-95"
+          className="bg-[#1c1c1e] text-[#8e8e93] hover:text-white rounded-full p-2.5 transition-colors relative active:scale-95 border border-white/5"
           aria-label="Notifications"
         >
           <Bell size={20} />
@@ -161,70 +192,86 @@ export default function HomePage() {
         </button>
       </header>
 
+      {/* Ask MIND Interactive Action Bar */}
+      <div
+        onClick={() => setIsSearchOpen(true)}
+        className="cursor-pointer bg-[#1c1c1e]/80 backdrop-blur-xl hover:bg-[#252528] active:scale-[0.99] border border-white/10 hover:border-white/20 rounded-2xl px-3.5 py-2.5 flex items-center justify-between transition-all shadow-sm my-1 group"
+      >
+        <div className="flex items-center gap-2.5 text-[#8e8e93] group-hover:text-white transition-colors">
+          <div className="w-6 h-6 rounded-lg bg-[#007aff]/15 text-[#007aff] flex items-center justify-center">
+            <Sparkles size={14} />
+          </div>
+          <span className="text-xs font-medium">Спросить MIND или найти...</span>
+        </div>
+        <kbd className="text-[10px] font-mono text-[#8e8e93] bg-white/5 border border-white/10 px-2 py-0.5 rounded-lg">
+          Поиск
+        </kbd>
+      </div>
+
       {/* Hero Balance Section */}
-      <section className="py-6 flex flex-col items-center justify-center text-center">
-        <p className="text-[#8e8e93] text-sm font-medium mb-1">Активность и задачи</p>
-        <h2 className="text-[38px] font-bold text-white tracking-tight leading-tight my-1">
+      <section className="py-5 flex flex-col items-center justify-center text-center">
+        <p className="text-[#8e8e93] text-xs font-medium uppercase tracking-wider mb-1">Активность и задачи</p>
+        <h2 className="text-[40px] font-extrabold text-white tracking-tight leading-tight my-0.5">
           {formatTasksCount(data?.tasksCount || 0)}
         </h2>
         <div className="mt-2">
           {data?.upcomingDeadline ? (
-            <span className="inline-flex items-center gap-1.5 text-xs text-[#30d158] bg-[#30d158]/10 px-3 py-1 rounded-full font-medium">
+            <span className="inline-flex items-center gap-1.5 text-xs text-[#30d158] bg-[#30d158]/10 border border-[#30d158]/20 px-3 py-1 rounded-full font-medium">
               ↑ В фокусе: Есть дедлайн
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs text-[#30d158] bg-[#30d158]/10 px-3 py-1 rounded-full font-medium">
+            <span className="inline-flex items-center gap-1.5 text-xs text-[#30d158] bg-[#30d158]/10 border border-[#30d158]/20 px-3 py-1 rounded-full font-medium">
               ↑ В фокусе: Все спокойно
             </span>
           )}
         </div>
       </section>
 
-      {/* Quick Action Buttons (4-column row) */}
-      <div className="grid grid-cols-4 gap-2.5 my-3">
+      {/* Quick Action Buttons (Telegram Wallet circular style) */}
+      <div className="grid grid-cols-4 gap-2 my-3">
         <button
           onClick={() => setIsNewTaskOpen(true)}
-          className="bg-[#1c1c1e] hover:bg-[#2c2c2e] active:scale-95 h-[68px] rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all"
+          className="flex flex-col items-center justify-center gap-1.5 group select-none active:scale-95 transition-all"
         >
-          <div className="w-7 h-7 rounded-full bg-[#007aff]/15 text-[#007aff] flex items-center justify-center">
-            <Plus size={16} strokeWidth={2.6} />
+          <div className="w-12 h-12 rounded-full bg-[#007aff] text-white flex items-center justify-center shadow-[0_4px_16px_rgba(0,122,255,0.35)] group-hover:bg-[#007aff]/90 transition-all">
+            <Plus size={22} strokeWidth={2.6} />
           </div>
-          <span className="text-[11px] font-semibold text-[#007aff]">Новая задача</span>
+          <span className="text-[11px] font-medium text-white/90 tracking-tight">Задача</span>
         </button>
 
         <button
           onClick={() => setIsSearchOpen(true)}
-          className="bg-[#1c1c1e] hover:bg-[#2c2c2e] active:scale-95 h-[68px] rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all"
+          className="flex flex-col items-center justify-center gap-1.5 group select-none active:scale-95 transition-all"
         >
-          <div className="w-7 h-7 rounded-full bg-[#007aff]/15 text-[#007aff] flex items-center justify-center">
-            <Search size={15} strokeWidth={2.4} />
+          <div className="w-12 h-12 rounded-full bg-[#1c1c1e] text-[#007aff] border border-white/5 flex items-center justify-center shadow-sm group-hover:bg-[#252528] transition-all">
+            <Search size={20} strokeWidth={2.4} />
           </div>
-          <span className="text-[11px] font-semibold text-[#007aff]">Поиск</span>
+          <span className="text-[11px] font-medium text-white/90 tracking-tight">Поиск</span>
         </button>
 
         <Link
           href="/memory"
-          className="bg-[#1c1c1e] hover:bg-[#2c2c2e] active:scale-95 h-[68px] rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all"
+          className="flex flex-col items-center justify-center gap-1.5 group select-none active:scale-95 transition-all"
         >
-          <div className="w-7 h-7 rounded-full bg-[#007aff]/15 text-[#007aff] flex items-center justify-center">
-            <Brain size={16} strokeWidth={2.4} />
+          <div className="w-12 h-12 rounded-full bg-[#1c1c1e] text-[#af52de] border border-white/5 flex items-center justify-center shadow-sm group-hover:bg-[#252528] transition-all">
+            <Brain size={20} strokeWidth={2.4} />
           </div>
-          <span className="text-[11px] font-semibold text-[#007aff]">Память</span>
+          <span className="text-[11px] font-medium text-white/90 tracking-tight">Память</span>
         </Link>
 
         <Link
           href="/artifacts"
-          className="bg-[#1c1c1e] hover:bg-[#2c2c2e] active:scale-95 h-[68px] rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all"
+          className="flex flex-col items-center justify-center gap-1.5 group select-none active:scale-95 transition-all"
         >
-          <div className="w-7 h-7 rounded-full bg-[#007aff]/15 text-[#007aff] flex items-center justify-center">
-            <FileText size={15} strokeWidth={2.4} />
+          <div className="w-12 h-12 rounded-full bg-[#1c1c1e] text-[#ff9500] border border-white/5 flex items-center justify-center shadow-sm group-hover:bg-[#252528] transition-all">
+            <FileText size={20} strokeWidth={2.4} />
           </div>
-          <span className="text-[11px] font-semibold text-[#007aff]">Файлы</span>
+          <span className="text-[11px] font-medium text-white/90 tracking-tight">Файлы</span>
         </Link>
       </div>
 
       {/* Announcement Banner */}
-      <div className="bg-gradient-to-r from-[#007aff] to-[#00b4d8] rounded-2xl p-4 text-white shadow-lg my-3">
+      <div className="bg-gradient-to-r from-[#007aff] to-[#00b4d8] rounded-3xl p-4 text-white shadow-[0_8px_24px_rgba(0,122,255,0.25)] border border-white/10 my-2">
         <h3 className="font-bold text-base">MIND AI OS</h3>
         <p className="text-xs opacity-90 mt-1 leading-relaxed">
           Голосовые заметки, генерация Word по ГОСТу и код в один клик

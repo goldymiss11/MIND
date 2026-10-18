@@ -18,12 +18,11 @@ export default function MemoryPage() {
   const [type, setType] = useState("semantic");
   const [saving, setSaving] = useState(false);
 
+  const [activeCategory, setActiveCategory] = useState<string>("all");
+
   useEffect(() => {
-    if (isReady && initData) {
+    if (isReady) {
       loadMemories();
-    } else if (isReady && !initData) {
-      setError("Please open this app inside Telegram");
-      setLoading(false);
     }
   }, [isReady, initData]);
 
@@ -31,10 +30,75 @@ export default function MemoryPage() {
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchWithAuth("/api/memories");
-      setMemories(Array.isArray(result) ? result : (result?.data ?? []));
+      if (initData) {
+        const result = await fetchWithAuth("/api/memories");
+        setMemories(Array.isArray(result) ? result : (result?.data ?? []));
+      } else {
+        // Fallback preview memories
+        setMemories([
+          {
+            id: "1",
+            type: "preference",
+            content: "Любит краткие сводки без лишних вступительных фраз и вежливых клише.",
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: "2",
+            type: "project",
+            content: "MIND: Личная ИИ операционная система в Telegram с единым оркестратором.",
+            createdAt: new Date(Date.now() - 86400000).toISOString(),
+          },
+          {
+            id: "3",
+            type: "educational",
+            content: "Курс дискретной математики: алгоритмы на графах, автоматы и машина Тьюринга.",
+            createdAt: new Date(Date.now() - 172800000).toISOString(),
+          },
+          {
+            id: "4",
+            type: "professional",
+            content: "Стек разработки: TypeScript, Next.js, Fastify, PostgreSQL pgvector, BullMQ.",
+            createdAt: new Date(Date.now() - 259200000).toISOString(),
+          },
+          {
+            id: "5",
+            type: "preference",
+            content: "Все документы DOCX генерировать со строгим соблюдением требований ГОСТ.",
+            createdAt: new Date(Date.now() - 345600000).toISOString(),
+          },
+        ]);
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to load memories");
+      if (!initData) {
+        setMemories([
+          {
+            id: "1",
+            type: "preference",
+            content: "Любит краткие сводки без лишних вступительных фраз и вежливых клише.",
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: "2",
+            type: "project",
+            content: "MIND: Личная ИИ операционная система в Telegram с единым оркестратором.",
+            createdAt: new Date(Date.now() - 86400000).toISOString(),
+          },
+          {
+            id: "3",
+            type: "educational",
+            content: "Курс дискретной математики: алгоритмы на графах, автоматы и машина Тьюринга.",
+            createdAt: new Date(Date.now() - 172800000).toISOString(),
+          },
+          {
+            id: "4",
+            type: "professional",
+            content: "Стек разработки: TypeScript, Next.js, Fastify, PostgreSQL pgvector, BullMQ.",
+            createdAt: new Date(Date.now() - 259200000).toISOString(),
+          },
+        ]);
+      } else {
+        setError(err.message || "Failed to load memories");
+      }
     } finally {
       setLoading(false);
     }
@@ -101,9 +165,23 @@ export default function MemoryPage() {
     );
   }
 
-  const filteredMemories = memories.filter((m) =>
-    searchQuery ? m.content?.toLowerCase().includes(searchQuery.toLowerCase()) : true
-  );
+  const categories = [
+    { id: "all", label: "Все" },
+    { id: "preference", label: "Предпочтения" },
+    { id: "project", label: "Проекты" },
+    { id: "educational", label: "Учеба" },
+    { id: "professional", label: "Работа" },
+    { id: "semantic", label: "Факты" },
+  ];
+
+  const filteredMemories = memories.filter((m) => {
+    const matchesSearch = searchQuery
+      ? m.content?.toLowerCase().includes(searchQuery.toLowerCase())
+      : true;
+    const matchesCategory =
+      activeCategory === "all" ? true : m.type?.toLowerCase() === activeCategory.toLowerCase();
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <main className="p-4 flex flex-col gap-4 min-h-screen bg-[#000000] text-white pb-24">
@@ -129,7 +207,7 @@ export default function MemoryPage() {
           placeholder="Поиск воспоминаний..." 
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full bg-[#1c1c1e] text-white placeholder-[#8e8e93] rounded-2xl pl-10 pr-10 py-3 border-none focus:outline-none focus:ring-1 focus:ring-[#007aff] text-sm transition-shadow"
+          className="w-full bg-[#1c1c1e] text-white placeholder-[#8e8e93] rounded-2xl pl-10 pr-10 py-3 border border-white/5 focus:outline-none focus:ring-1 focus:ring-[#007aff] text-sm transition-shadow shadow-sm"
         />
         {searchQuery && (
           <button
@@ -141,8 +219,28 @@ export default function MemoryPage() {
         )}
       </div>
 
+      {/* Category Pills (Horizontal Scroll) */}
+      <div className="flex gap-2 overflow-x-auto no-scrollbar py-0.5">
+        {categories.map((cat) => {
+          const isActive = activeCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              onClick={() => setActiveCategory(cat.id)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                isActive
+                  ? "bg-[#007aff] text-white shadow-sm"
+                  : "bg-[#1c1c1e] text-[#8e8e93] hover:text-white border border-white/5"
+              }`}
+            >
+              {cat.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Memories List: Grouped Container */}
-      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden">
+      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden border border-white/5 shadow-sm">
         {filteredMemories.length > 0 ? (
           filteredMemories.map((m) => (
             <div
