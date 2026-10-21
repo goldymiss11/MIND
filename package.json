@@ -11,7 +11,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build:packages": "npm run --workspace=@mind/shared build && npm run --workspace=@mind/db build && npm run --workspace=@mind/ai build && npm run --workspace=@mind/memory build && npm run --workspace=@mind/core build && npm run --workspace=@mind/telegram build",
+    "build:packages": "npm run --workspace=@mind/shared build && npm run --workspace=@mind/db build && npm run --workspace=@mind/ai build && npm run --workspace=@mind/memory build && npm run --workspace=@mind/core build && npm run --workspace=@mind/telegram build && npm run --workspace=@mind/worker build",
     "build": "npm run build:packages && npm run --workspaces --if-present build",
     "typecheck": "npm run --workspaces --if-present typecheck",
     "test": "npm run --workspaces --if-present test",
