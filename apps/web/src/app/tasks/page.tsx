@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { useTelegram } from "../../lib/telegram/useTelegram";
 import { fetchWithAuth } from "../../lib/api/client";
-import { CheckCircle2, Circle, Clock, Plus, Trash2, X } from "lucide-react";
+import { CheckCircle2, Circle, Clock, Plus, Trash2, AlertCircle } from "lucide-react";
+import { CardGroup } from "../../components/ui/CardGroup";
+import { ModalSheet } from "../../components/ui/ModalSheet";
+import { CardGroupSkeleton } from "../../components/ui/LoadingSkeleton";
 
 export default function TasksPage() {
-  const { initData, isReady } = useTelegram();
+  const { initData, isReady, haptic, confirm: tgConfirm } = useTelegram();
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +120,9 @@ export default function TasksPage() {
   const toggleTask = async (taskId: string, currentStatus: string) => {
     const isCompleted = currentStatus === "completed";
     const newStatus = isCompleted ? "in_progress" : "completed";
-    
+
+    haptic.impact(isCompleted ? "light" : "medium");
+
     // Optimistic update
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
@@ -138,6 +143,7 @@ export default function TasksPage() {
   };
 
   const deleteTask = async (taskId: string) => {
+    haptic.impact("heavy");
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     try {
       await fetchWithAuth(`/api/tasks/${taskId}`, {
@@ -165,6 +171,7 @@ export default function TasksPage() {
         }),
       });
 
+      haptic.notification("success");
       if (newTask) {
         setTasks((prev) => [newTask, ...prev]);
       }
@@ -173,33 +180,12 @@ export default function TasksPage() {
       setDeadline("");
       setIsModalOpen(false);
     } catch (err: any) {
+      haptic.notification("error");
       alert(err.message || "Failed to create task");
     } finally {
       setSaving(false);
     }
   };
-
-  if (!isReady || loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#000000]">
-        <div className="w-8 h-8 border-3 border-[#007aff] border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center bg-[#000000]">
-        <p className="text-rose-400 mb-4 text-sm">{error}</p>
-        <button
-          onClick={loadTasks}
-          className="px-5 py-2.5 bg-[#007aff] hover:bg-[#007aff]/90 text-white font-medium rounded-2xl text-sm"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
 
   // Filter tasks logic
   const now = new Date();
@@ -231,29 +217,72 @@ export default function TasksPage() {
     { id: "Completed", label: "Готово" },
   ];
 
-  return (
-    <main className="p-4 flex flex-col gap-4 min-h-screen bg-[#000000] text-white pb-24">
-      <header className="mt-2 mb-1 flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-white tracking-tight">Задачи</h1>
+  if (!isReady || loading) {
+    return (
+      <main className="p-4 flex flex-col gap-4 min-h-screen bg-[#000000] text-white">
+        <header className="mt-2 mb-1 flex justify-between items-center">
+          <div className="h-7 w-28 rounded-md skeleton-shimmer" />
+          <div className="h-9 w-32 rounded-2xl skeleton-shimmer" />
+        </header>
+        <div className="h-10 rounded-2xl skeleton-shimmer" />
+        <CardGroupSkeleton rows={4} />
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center bg-[#000000]">
+        <div className="w-14 h-14 rounded-full bg-rose-500/15 text-rose-400 flex items-center justify-center mb-3">
+          <AlertCircle size={28} />
+        </div>
+        <h2 className="text-lg font-bold text-white mb-1">Не удалось загрузить задачи</h2>
+        <p className="text-[#8e8e93] mb-5 text-sm max-w-xs">{error}</p>
         <button
-          onClick={() => setIsModalOpen(true)}
-          className="bg-[#007aff] hover:bg-[#007aff]/90 text-white py-2 px-3.5 rounded-2xl flex items-center gap-1.5 text-xs font-semibold active:scale-95 transition-all shadow-sm"
+          onClick={loadTasks}
+          className="px-6 py-3 bg-[#007aff] hover:bg-[#1a8aff] active:scale-95 text-white font-semibold rounded-[18px] text-sm transition-all shadow-[0_4px_16px_rgba(0,122,255,0.3)]"
         >
-          <Plus size={16} strokeWidth={2.5} /> Новая задача
+          Повторить
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <main className="p-4 pb-32 flex flex-col gap-3.5 min-h-screen bg-[#000000] text-white">
+      {/* Header */}
+      <header className="mt-2 mb-1 flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Задачи</h1>
+          <p className="text-xs text-[#8e8e93] mt-0.5">
+            {tasks.filter((t) => t.status !== "completed").length} активных
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            haptic.impact("medium");
+            setIsModalOpen(true);
+          }}
+          className="bg-[#007aff] hover:bg-[#1a8aff] text-white py-2 px-3.5 rounded-[18px] flex items-center gap-1.5 text-xs font-semibold active:scale-95 transition-all shadow-[0_4px_16px_rgba(0,122,255,0.35)]"
+        >
+          <Plus size={16} strokeWidth={2.6} /> Новая задача
         </button>
       </header>
 
-      {/* Segmented Filter Controls */}
-      <div className="bg-[#1c1c1e] p-1 rounded-2xl flex gap-1 border border-white/5 shadow-sm">
+      {/* Segmented Filter Controls (Wallet pill tab bar style) */}
+      <div className="bg-[#16171b] p-1 rounded-2xl flex gap-1 border border-white/[0.07] shadow-sm">
         {filterTabs.map((tab) => {
           const isActive = activeFilter === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveFilter(tab.id)}
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-xl transition-all ${
+              onClick={() => {
+                haptic.selection();
+                setActiveFilter(tab.id);
+              }}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-xl transition-all duration-150 select-none ${
                 isActive
-                  ? "bg-[#2c2c2e] text-white shadow-sm border border-white/5"
+                  ? "bg-[#24252c] text-white shadow-sm border border-white/[0.08]"
                   : "text-[#8e8e93] hover:text-white"
               }`}
             >
@@ -264,59 +293,63 @@ export default function TasksPage() {
       </div>
 
       {/* Task List: Grouped Container */}
-      <div className="bg-[#1c1c1e] rounded-3xl divide-y divide-white/5 overflow-hidden border border-white/5 shadow-sm">
+      <CardGroup>
         {filteredTasks.length > 0 ? (
           filteredTasks.map((task) => (
             <div
               key={task.id}
-              className="p-4 flex items-start gap-3 hover:bg-white/[0.02] transition-colors"
+              className="p-4 flex items-start gap-3.5 hover:bg-white/[0.02] transition-colors"
             >
               <button
                 onClick={() => toggleTask(task.id, task.status)}
-                className="mt-0.5 shrink-0 transition-transform active:scale-90"
+                className="mt-0.5 shrink-0 transition-transform active:scale-90 touch-scale"
+                aria-label={task.status === "completed" ? "Отметить невыполненной" : "Отметить выполненной"}
               >
                 {task.status === "completed" ? (
                   <CheckCircle2 size={22} className="text-[#30d158]" />
                 ) : (
-                  <Circle size={22} className="text-[#8e8e93] hover:text-[#007aff]" />
+                  <Circle size={22} className="text-[#8e8e93] hover:text-[#007aff] transition-colors" />
                 )}
               </button>
-              <div className="flex-1 overflow-hidden">
+
+              <div className="flex-1 overflow-hidden min-w-0">
                 <h3
-                  className={`text-[15px] font-medium leading-tight mb-1 ${
+                  className={`text-[15px] font-semibold leading-snug mb-1 tracking-tight break-words ${
                     task.status === "completed" ? "text-[#8e8e93] line-through" : "text-white"
                   }`}
                 >
                   {task.title}
                 </h3>
                 {task.description && (
-                  <p className="text-[#8e8e93] text-xs line-clamp-2 mb-2 leading-relaxed">
+                  <p className="text-[#8e8e93] text-[13px] line-clamp-2 mb-2 leading-relaxed">
                     {task.description}
                   </p>
                 )}
-                <div className="flex items-center gap-2.5 mt-1.5">
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
                   {task.deadline && (
-                    <div className="flex items-center gap-1 text-[#007aff] text-xs font-medium">
+                    <div className="inline-flex items-center gap-1 text-[#007aff] text-xs font-medium bg-[#007aff]/10 px-2.5 py-0.5 rounded-full">
                       <Clock size={12} />
                       <span>{new Date(task.deadline).toLocaleDateString()}</span>
                     </div>
                   )}
                   {task.priority === "high" && (
-                    <span className="text-[10px] font-bold text-rose-400 bg-rose-500/15 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] font-bold text-rose-400 bg-rose-500/15 border border-rose-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
                       Высокий
                     </span>
                   )}
                 </div>
               </div>
+
               <button
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  if (confirm(`Удалить задачу «${task.title}»?`)) {
+                  const ok = await tgConfirm(`Удалить задачу «${task.title}»?`);
+                  if (ok) {
                     deleteTask(task.id);
                   }
                 }}
-                className="text-[#8e8e93] hover:text-rose-400 active:text-rose-400 p-2 rounded-xl hover:bg-rose-500/10 transition-all shrink-0"
-                aria-label="Delete task"
+                className="text-[#8e8e93] hover:text-rose-400 active:text-rose-400 p-2 rounded-xl hover:bg-rose-500/10 transition-all shrink-0 touch-scale"
+                aria-label="Удалить задачу"
                 title="Удалить задачу"
               >
                 <Trash2 size={16} />
@@ -328,7 +361,10 @@ export default function TasksPage() {
             <p className="text-sm font-medium">В этом списке нет задач</p>
             {activeFilter !== "All" && (
               <button
-                onClick={() => setActiveFilter("All")}
+                onClick={() => {
+                  haptic.selection();
+                  setActiveFilter("All");
+                }}
                 className="text-[#007aff] text-xs font-semibold mt-2 hover:underline"
               >
                 Показать все задачи
@@ -336,90 +372,80 @@ export default function TasksPage() {
             )}
           </div>
         )}
-      </div>
+      </CardGroup>
 
       {/* New Task Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
-          <div className="bg-[#1c1c1e] w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 border border-white/10 shadow-2xl flex flex-col gap-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-lg font-bold text-white">Новая задача</h2>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-[#8e8e93] hover:text-white p-1 rounded-full transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateTask} className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Название *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Что нужно сделать?"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-[#2c2c2e] text-white rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff] placeholder-[#8e8e93]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Описание (необязательно)</label>
-                <textarea
-                  rows={2}
-                  placeholder="Заметки или контекст..."
-                  value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
-                  className="w-full bg-[#2c2c2e] text-white rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff] placeholder-[#8e8e93] resize-none"
-                />
-              </div>
-
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Дедлайн</label>
-                  <input
-                    type="date"
-                    value={deadline}
-                    onChange={(e) => setDeadline(e.target.value)}
-                    className="w-full bg-[#2c2c2e] text-white rounded-2xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff]"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Приоритет</label>
-                  <select
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value as any)}
-                    className="w-full bg-[#2c2c2e] text-white rounded-2xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#007aff]"
-                  >
-                    <option value="normal">Обычный</option>
-                    <option value="high">Высокий</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex gap-2.5 mt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="flex-1 py-3 bg-[#2c2c2e] hover:bg-[#38383a] text-white rounded-2xl text-sm font-medium transition-colors"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving || !title.trim()}
-                  className="flex-1 py-3 bg-[#007aff] hover:bg-[#007aff]/90 text-white rounded-2xl text-sm font-semibold disabled:opacity-50 transition-colors"
-                >
-                  {saving ? "Сохранение..." : "Создать задачу"}
-                </button>
-              </div>
-            </form>
+      <ModalSheet
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Новая задача"
+        subtitle="Что нужно запланировать или выполнить?"
+      >
+        <form onSubmit={handleCreateTask} className="flex flex-col gap-3.5">
+          <div>
+            <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Название *</label>
+            <input
+              type="text"
+              required
+              placeholder="Что нужно сделать?"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-[#202127] text-white rounded-[18px] px-4 py-3 text-sm border border-white/[0.07] focus:outline-none focus:border-[#007aff] placeholder-[#707579] transition-all"
+            />
           </div>
-        </div>
-      )}
+
+          <div>
+            <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Описание (необязательно)</label>
+            <textarea
+              rows={2}
+              placeholder="Заметки или контекст..."
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              className="w-full bg-[#202127] text-white rounded-[18px] px-4 py-3 text-sm border border-white/[0.07] focus:outline-none focus:border-[#007aff] placeholder-[#707579] resize-none transition-all"
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Дедлайн</label>
+              <input
+                type="date"
+                value={deadline}
+                onChange={(e) => setDeadline(e.target.value)}
+                className="w-full bg-[#202127] text-white rounded-[18px] px-3.5 py-2.5 text-sm border border-white/[0.07] focus:outline-none focus:border-[#007aff]"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-[#8e8e93] mb-1.5 block font-medium">Приоритет</label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as any)}
+                className="w-full bg-[#202127] text-white rounded-[18px] px-3.5 py-2.5 text-sm border border-white/[0.07] focus:outline-none focus:border-[#007aff]"
+              >
+                <option value="normal">Обычный</option>
+                <option value="high">Высокий</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex gap-2.5 mt-2">
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              className="flex-1 py-3.5 bg-[#202127] hover:bg-[#26272e] active:scale-[0.98] text-white rounded-[18px] text-sm font-medium transition-all"
+            >
+              Отмена
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !title.trim()}
+              className="flex-1 py-3.5 bg-[#007aff] hover:bg-[#1a8aff] active:scale-[0.98] text-white rounded-[18px] text-sm font-semibold disabled:opacity-50 transition-all shadow-[0_4px_16px_rgba(0,122,255,0.3)]"
+            >
+              {saving ? "Сохранение..." : "Создать задачу"}
+            </button>
+          </div>
+        </form>
+      </ModalSheet>
     </main>
   );
 }
-

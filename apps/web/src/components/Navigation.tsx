@@ -7,6 +7,7 @@ import { Home, CheckSquare, Brain, FileText, Settings } from "lucide-react";
 export function Navigation() {
   const pathname = usePathname();
 
+  // Hide navigation in admin dashboard
   if (pathname?.startsWith("/admin")) {
     return null;
   }
@@ -32,9 +33,9 @@ export function Navigation() {
   return (
     <nav
       aria-label="Основная навигация"
-      className="fixed bottom-4 sm:bottom-6 inset-x-0 mx-auto w-[calc(100%-1.5rem)] max-w-[400px] z-50 pointer-events-none pb-[env(safe-area-inset-bottom,0px)]"
+      className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] inset-x-0 mx-auto w-[calc(100%-1.5rem)] max-w-[390px] z-40 pointer-events-none"
     >
-      <div className="pointer-events-auto relative rounded-full p-1.5 flex justify-between items-center glass-dock transition-all">
+      <div className="pointer-events-auto relative rounded-full p-1 flex justify-between items-center glass-dock">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           const Icon = item.icon;
@@ -44,29 +45,21 @@ export function Navigation() {
               key={item.href}
               href={item.href}
               onClick={handleTabClick}
-              className={`relative flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-full transition-all duration-200 select-none ${
+              className={`relative flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-full transition-all duration-150 select-none ${
                 isActive
                   ? "glass-pill-active text-[#007aff]"
-                  : "text-[#8e8e93] hover:text-white/95 hover:bg-white/[0.04] active:scale-92 active:opacity-75"
+                  : "text-[#8e8e93] hover:text-white/90 hover:bg-white/[0.04] active:scale-95"
               }`}
             >
-              <div className="relative flex items-center justify-center">
-                {isActive && (
-                  <div
-                    aria-hidden="true"
-                    className="absolute -inset-1.5 bg-[#007aff]/30 blur-sm rounded-full pointer-events-none"
-                  />
-                )}
-                <Icon
-                  size={20}
-                  strokeWidth={isActive ? 2.4 : 1.9}
-                  className={`relative transition-transform duration-200 ${
-                    isActive ? "scale-105 text-[#007aff]" : "text-[#8e8e93]"
-                  }`}
-                />
-              </div>
+              <Icon
+                size={20}
+                strokeWidth={isActive ? 2.4 : 2}
+                className={`transition-colors duration-150 ${
+                  isActive ? "text-[#007aff]" : "text-[#8e8e93]"
+                }`}
+              />
               <span
-                className={`text-[10px] tracking-tight mt-1 leading-none select-none transition-colors duration-200 ${
+                className={`text-[10px] tracking-tight mt-1 leading-none select-none transition-colors duration-150 ${
                   isActive ? "text-[#007aff] font-semibold" : "text-[#8e8e93] font-medium"
                 }`}
               >
