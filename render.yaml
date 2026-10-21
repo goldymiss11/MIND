@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: mind-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: NODE_ENV
+        value: "production"
+      - key: TELEGRAM_BOT_MODE
+        value: "polling"
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPEN_ROUTER_API
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ADMIN_SECRET
+        sync: false
+      - key: MINI_APP_URL
+        sync: false
