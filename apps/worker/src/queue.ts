@@ -35,21 +35,29 @@ const rootEnvPath =
 
 dotenv.config({ path: rootEnvPath });
 
-export const REDIS_URL = process.env["REDIS_URL"] || "redis://localhost:6379";
-
-export const connection = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-  lazyConnect: true,
-});
-
-connection.on("error", (err) => {
-  console.error(`[Redis] Connection error on ${REDIS_URL}:`, err.message);
-});
+export const REDIS_URL = process.env["REDIS_URL"] || "";
 
 export const PROACTIVE_QUEUE_NAME = "proactive-tasks";
 
-export const proactiveQueue = new Queue(PROACTIVE_QUEUE_NAME, {
-  connection,
-});
+let connectionInstance: Redis | null = null;
+let queueInstance: Queue | null = null;
 
+if (REDIS_URL) {
+  connectionInstance = new Redis(REDIS_URL, {
+    maxRetriesPerRequest: null,
+    lazyConnect: true,
+    enableOfflineQueue: false,
+  });
+
+  connectionInstance.on("error", (err) => {
+    console.error(`[Redis] Connection error on ${REDIS_URL}:`, err.message);
+  });
+
+  queueInstance = new Queue(PROACTIVE_QUEUE_NAME, {
+    connection: connectionInstance,
+  });
+}
+
+export const connection = connectionInstance as unknown as Redis;
+export const proactiveQueue = queueInstance as unknown as Queue;
 export const queue = proactiveQueue;

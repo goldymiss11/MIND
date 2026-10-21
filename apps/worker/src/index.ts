@@ -40,6 +40,9 @@ export interface WorkerInstance {
 }
 
 export async function startWorker(): Promise<WorkerInstance> {
+  if (!connection || !queue) {
+    throw new Error("REDIS_URL is not set. Proactive worker queue cannot start without Redis.");
+  }
   const token = process.env["TELEGRAM_BOT_TOKEN"];
   if (!token) {
     console.warn("⚠️ TELEGRAM_BOT_TOKEN is not set. Worker will not be able to deliver Telegram messages.");
