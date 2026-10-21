@@ -24,6 +24,20 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     tiers: ["simple"],
     capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: true, supportsEmbeddings: false, supportsGoogleSearch: true }
   },
+  "gemini-3.8-flash": {
+    provider: "gemini",
+    model: "gemini-3.8-flash",
+    pricingClass: "free",
+    tiers: ["standard", "complex"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: true, supportsEmbeddings: false, supportsGoogleSearch: true }
+  },
+  "gemini-3.6-flash": {
+    provider: "gemini",
+    model: "gemini-3.6-flash",
+    pricingClass: "free",
+    tiers: ["standard", "complex"],
+    capabilities: { supportsStructuredOutput: true, supportsToolCalling: true, supportsVision: true, supportsEmbeddings: false, supportsGoogleSearch: true }
+  },
   "gemini-3.5-flash": {
     provider: "gemini",
     model: "gemini-3.5-flash",
@@ -86,8 +100,8 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
 
 export const DEFAULT_MODEL_MAPPING: Record<AiTaskTier, string> = {
   simple: "gemini-3.5-flash-lite",
-  standard: "gemini-3.5-flash",
-  complex: "gemini-3.5-flash",
+  standard: "gemini-3.8-flash",
+  complex: "gemini-3.8-flash",
   embedding: "gemini-embedding-2",
 };
 

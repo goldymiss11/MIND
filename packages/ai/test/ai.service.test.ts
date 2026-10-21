@@ -5,11 +5,11 @@ import { resolveModel } from "../src/models.js";
 
 test("resolveModel: correctly resolves each tier and supports override", () => {
   assert.equal(resolveModel("simple"), "gemini-3.5-flash-lite");
-  assert.equal(resolveModel("standard"), "gemini-3.5-flash");
-  assert.equal(resolveModel("complex"), "gemini-3.5-flash");
+  assert.equal(resolveModel("standard"), "gemini-3.8-flash");
+  assert.equal(resolveModel("complex"), "gemini-3.8-flash");
   assert.equal(resolveModel("embedding"), "gemini-embedding-2");
   assert.equal(resolveModel("standard", "custom-model"), "custom-model");
-  assert.equal(resolveModel("complex", "   "), "gemini-3.5-flash");
+  assert.equal(resolveModel("complex", "   "), "gemini-3.8-flash");
 });
 
 test("AiService: generateText sends prompt and returns AiResponse with text and usage", async () => {

@@ -165,10 +165,10 @@ export class AiRouter {
         break;
       case "PROVIDER_UNAVAILABLE":
       case "TIMEOUT":
-        // Down
+        // Down temporarily (transient spikes usually last a few seconds)
         this.healthState.set(providerId, {
           status: "unavailable",
-          resetAt: Date.now() + this.cooldownMs
+          resetAt: Date.now() + Math.min(this.cooldownMs, 15000)
         });
         break;
       default:

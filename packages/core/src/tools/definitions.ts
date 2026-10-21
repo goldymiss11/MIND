@@ -274,7 +274,7 @@ export const invokeSkillTool: ToolDefinition = {
         format = "ts";
       } else if (/(\.js|javascript)/i.test(prompt)) {
         format = "js";
-      } else if (/(\.html|веб-страниц|верстк)/i.test(prompt)) {
+      } else if (/(\.html|веб-страниц|верстк|лендинг|интерфейс|сайт\b|ui-макет)/i.test(prompt)) {
         format = "html";
       } else if (/(\.css|стили)/i.test(prompt)) {
         format = "css";
@@ -307,7 +307,7 @@ export const invokeSkillTool: ToolDefinition = {
         format = "ts";
       } else if (/(\.js|javascript)/i.test(prompt)) {
         format = "js";
-      } else if (/(\.html|веб-страниц|верстк)/i.test(prompt)) {
+      } else if (/(\.html|веб-страниц|верстк|лендинг|интерфейс|сайт\b|ui-макет)/i.test(prompt)) {
         format = "html";
       }
     }
