@@ -37,6 +37,8 @@ export function buildServer(): FastifyInstance {
           parsed.hostname === "onrender.com" ||
           parsed.hostname.endsWith(".vercel.app") ||
           parsed.hostname === "vercel.app" ||
+          parsed.hostname.endsWith(".koyeb.app") ||
+          parsed.hostname === "koyeb.app" ||
           parsed.hostname.endsWith(".telegram.org") ||
           parsed.hostname === "telegram.org"
         ) {
