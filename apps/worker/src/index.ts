@@ -48,7 +48,7 @@ export async function startWorker(): Promise<WorkerInstance> {
     console.warn("⚠️ TELEGRAM_BOT_TOKEN is not set. Worker will not be able to deliver Telegram messages.");
   }
   const telegramApi = token ? new Api(token) : null;
-  const cronSchedule = process.env["REMINDER_CRON_SCHEDULE"] || "*/5 * * * *";
+  const cronSchedule = process.env["REMINDER_CRON_SCHEDULE"] || "* * * * *";
 
   console.log("[Proactive Worker] Starting MIND Proactive Engine Worker...");
   console.log(`[Proactive Worker] Initialized queue: "${PROACTIVE_QUEUE_NAME}"`);

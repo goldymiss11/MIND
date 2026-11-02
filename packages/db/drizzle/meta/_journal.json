@@ -50,6 +50,13 @@
       "when": 1792087423399,
       "tag": "0006_cute_martin_li",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793660633200,
+      "tag": "0007_majestic_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }

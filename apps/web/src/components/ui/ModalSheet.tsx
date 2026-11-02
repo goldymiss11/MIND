@@ -1,23 +1,18 @@
 "use client";
 
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface ModalSheetProps {
   isOpen: boolean;
   onClose: () => void;
-  title: string;
+  title?: string;
   subtitle?: string;
   children: React.ReactNode;
 }
 
-export function ModalSheet({
-  isOpen,
-  onClose,
-  title,
-  subtitle,
-  children,
-}: ModalSheetProps) {
+export function ModalSheet({ isOpen, onClose, title, subtitle, children }: ModalSheetProps) {
   useEffect(() => {
     if (!isOpen) return;
 
@@ -37,42 +32,36 @@ export function ModalSheet({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 transition-all"
+      aria-label={title}
+      className="animate-fade-in fixed inset-0 z-[60] flex items-end justify-center bg-black/55"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-[#16171b] border-t sm:border border-white/[0.08] rounded-t-[32px] sm:rounded-[32px] p-6 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] sm:pb-6 shadow-[0_-10px_40px_rgba(0,0,0,0.8)] sm:shadow-2xl animate-sheet-up flex flex-col gap-4 max-h-[90vh] overflow-y-auto no-scrollbar"
+        className="animate-sheet-up no-scrollbar relative max-h-[92dvh] w-full max-w-[480px] overflow-y-auto rounded-t-[32px] bg-card px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] pt-5"
       >
-        {/* Mobile Drag Indicator Bar */}
-        <div className="w-10 h-1 bg-white/20 rounded-full mx-auto -mt-2 mb-1 sm:hidden" />
+        <button
+          onClick={onClose}
+          className="pressable absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-ink/10 text-ink/80"
+          aria-label="Закрыть"
+        >
+          <X size={20} strokeWidth={2.4} />
+        </button>
 
-        {/* Header */}
-        <div className="flex justify-between items-start gap-3">
-          <div>
-            <h2 className="text-lg font-bold text-white tracking-tight leading-tight">
-              {title}
-            </h2>
-            {subtitle && (
-              <p className="text-xs text-[#8e8e93] mt-1">{subtitle}</p>
-            )}
+        {title && (
+          <div className="mb-4 pr-12">
+            <h2 className="break-words text-[22px] font-bold leading-7">{title}</h2>
+            {subtitle && <p className="mt-1 text-[15px] leading-5 text-hint">{subtitle}</p>}
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 active:scale-90 flex items-center justify-center text-[#8e8e93] hover:text-white transition-all shrink-0"
-            aria-label="Закрыть"
-          >
-            <X size={18} />
-          </button>
-        </div>
+        )}
 
-        {/* Content */}
-        <div className="pt-1">{children}</div>
+        {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

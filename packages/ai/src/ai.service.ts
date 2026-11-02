@@ -83,112 +83,79 @@ export class AiService {
     let delay = 1500;
     const maxRetries = 3;
     const hasVision = Boolean(options?.imageBase64 || (options?.images && options.images.length > 0));
+    const isExplicitModel = Boolean(typeof options === "string" ? options : options?.model);
+
+    const requiredCapabilities = {
+      tools: Boolean(options?.tools && options.tools.length > 0),
+      structuredOutput: operation === "structured",
+      vision: hasVision,
+      embeddings: operation === "embedding",
+      googleSearch: Boolean(options?.googleSearch),
+    };
+    const tier = options?.tier ?? (operation === "embedding" ? "embedding" : "standard");
+
+    /** What the router would pick now, or null when it can offer nothing else. */
+    const nextCandidate = (): AiRoutingDecision | null => {
+      if (isExplicitModel || operation === "embedding") return null;
+      try {
+        return this.router.route({ operation, tier, requiredCapabilities });
+      } catch {
+        return null;
+      }
+    };
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      let decision: AiRoutingDecision;
-      try {
-        const hasTools = options?.tools && options.tools.length > 0;
-        
-        decision = this.router.route({
-           operation,
-           tier: options?.tier ?? (operation === "embedding" ? "embedding" : "standard"),
-           explicitModel: typeof options === "string" ? options : options?.model,
-           requiredCapabilities: {
-             tools: hasTools,
-             structuredOutput: operation === "structured",
-             vision: hasVision,
-             embeddings: operation === "embedding",
-             googleSearch: Boolean(options?.googleSearch)
-           }
-        });
-      } catch (err) {
-        // Routing error (no compatible model found)
-        throw err;
-      }
+      const decision = this.router.route({
+        operation,
+        tier,
+        explicitModel: typeof options === "string" ? options : options?.model,
+        requiredCapabilities,
+      });
 
       const provider = this.providers[decision.providerId];
       if (!provider) {
-         throw new Error(`Provider ${decision.providerId} not instantiated`);
+        throw new Error(`Provider ${decision.providerId} not instantiated`);
       }
 
       try {
-        const result = await executeFn(provider, decision.model);
-        return result;
+        return await executeFn(provider, decision.model);
       } catch (error: any) {
-         const code = this.extractErrorCode(error);
-         this.router.reportError(decision.providerId, code);
+        const code = this.extractErrorCode(error);
+        this.router.reportError(decision.providerId, code);
 
-         const isExplicitModel = Boolean(typeof options === "string" ? options : options?.model);
-         const canRetrySameProvider = (
-           code === ProviderErrorCode.PROVIDER_UNAVAILABLE ||
-           code === ProviderErrorCode.RATE_LIMITED ||
-           code === ProviderErrorCode.TIMEOUT
-         );
+        if (attempt < maxRetries) {
+          if (code === ProviderErrorCode.QUOTA_EXCEEDED || code === ProviderErrorCode.AUTH_ERROR) {
+            // Permanent for this provider: only another provider can help.
+            if (nextCandidate()) {
+              console.warn(`${code} on provider ${decision.providerId}. Switching to alternative provider...`);
+              continue;
+            }
+            console.error(`Fatal API error (${code}) on provider ${decision.providerId}: no alternatives available.`);
+            throw error;
+          }
 
-         if (attempt < maxRetries) {
-           if (code === ProviderErrorCode.QUOTA_EXCEEDED || code === ProviderErrorCode.AUTH_ERROR) {
-             // Permanent exhaustion or missing credentials on this provider.
-             // Only retry if an alternative provider is available without explicit model pinning.
-             if (!isExplicitModel && operation !== "embedding") {
-               try {
-                 const hasTools = options?.tools && options.tools.length > 0;
-                 this.router.route({
-                   operation,
-                   tier: options?.tier ?? "standard",
-                   requiredCapabilities: {
-                     tools: hasTools,
-                     structuredOutput: operation === "structured",
-                     vision: hasVision,
-                     embeddings: false,
-                     googleSearch: Boolean(options?.googleSearch)
-                   }
-                 });
-                 console.warn(`${code} on provider ${decision.providerId}. Switching to alternative provider...`);
-                 continue; // Switch to alternative provider immediately without backoff delay
-               } catch {
-                 // No alternative available
-               }
-             }
+          if (
+            code === ProviderErrorCode.PROVIDER_UNAVAILABLE ||
+            code === ProviderErrorCode.RATE_LIMITED ||
+            code === ProviderErrorCode.TIMEOUT
+          ) {
+            // Prefer a healthy provider now over waiting out a backoff on this one.
+            const next = nextCandidate();
+            if (next && next.providerId !== decision.providerId && this.router.getProviderHealth(next.providerId).status === "healthy") {
+              console.warn(`Provider ${decision.providerId} (${code}). Switching immediately to healthy provider ${next.providerId}...`);
+              continue;
+            }
 
-             console.error(`Fatal API error (${code}) on provider ${decision.providerId}: no alternatives available.`);
-             throw error;
-           }
+            console.warn(`API error (${code}) on provider ${decision.providerId}. Retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            delay = Math.round(delay * 2);
+            continue;
+          }
+        }
 
-           if (canRetrySameProvider) {
-             // If another healthy provider is available, prefer switching immediately rather than waiting for backoff
-             if (!isExplicitModel && operation !== "embedding") {
-               try {
-                 const hasTools = options?.tools && options.tools.length > 0;
-                 const nextDecision = this.router.route({
-                   operation,
-                   tier: options?.tier ?? "standard",
-                   requiredCapabilities: {
-                     tools: hasTools,
-                     structuredOutput: operation === "structured",
-                     vision: hasVision,
-                     embeddings: false,
-                     googleSearch: Boolean(options?.googleSearch)
-                   }
-                 });
-                 if (nextDecision.providerId !== decision.providerId && this.router.getProviderHealth(nextDecision.providerId).status === "healthy") {
-                   console.warn(`Provider ${decision.providerId} (${code}). Switching immediately to healthy provider ${nextDecision.providerId}...`);
-                   continue;
-                 }
-               } catch {
-                 // Fall through to same-provider backoff retry
-               }
-             }
-
-             console.warn(`API error (${code}) on provider ${decision.providerId}. Retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
-             await new Promise((resolve) => setTimeout(resolve, delay));
-             delay = Math.round(delay * 2);
-             continue;
-           }
-         }
-
-         // Fatal or retries exhausted
-         console.error(`Fatal API error (${code}) on provider ${decision.providerId}`);
-         throw error;
+        // Fatal or retries exhausted
+        console.error(`Fatal API error (${code}) on provider ${decision.providerId}`);
+        throw error;
       }
     }
 

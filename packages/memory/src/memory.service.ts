@@ -41,7 +41,7 @@ export const MEMORY_EXTRACTION_SCHEMA = {
             ],
           },
           content: { type: Type.STRING, description: "Extracted memory or fact" },
-          importance: { type: Type.NUMBER, description: "Importance score (0-3)" },
+          importance: { type: Type.NUMBER, description: "Importance score from 1 to 10" },
           confidence: { type: Type.NUMBER, description: "Confidence score (0.0-1.0)" },
         },
         required: ["type", "content"],

@@ -5,8 +5,9 @@ import { ProviderErrorCode } from "../src/provider.js";
 
 describe("OpenRouterProvider", () => {
   test("initialization throws if no API key", async () => {
-    const original = process.env.OPENROUTER_API_KEY;
-    delete process.env.OPENROUTER_API_KEY;
+    const aliases = ["OPENROUTER_API_KEY", "OPEN_ROUTER_API", "OPEN_ROUTER_API_KEY", "OPENROUTER_API"];
+    const originals = aliases.map((name) => process.env[name]);
+    aliases.forEach((name) => delete process.env[name]);
 
     const provider = new OpenRouterProvider();
     await assert.rejects(async () => {
@@ -15,9 +16,9 @@ describe("OpenRouterProvider", () => {
       return err.code === ProviderErrorCode.AUTH_ERROR;
     });
 
-    if (original) {
-      process.env.OPENROUTER_API_KEY = original;
-    }
+    aliases.forEach((name, i) => {
+      if (originals[i]) process.env[name] = originals[i];
+    });
   });
 
   test("capabilities match real OpenRouter abilities", () => {

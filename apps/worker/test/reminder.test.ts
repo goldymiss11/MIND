@@ -65,12 +65,12 @@ test("scanReminders sends reminders to telegram users and updates tasks", async 
   assert.equal(sentMessages[0]?.chatId, 111222);
   assert.equal(
     sentMessages[0]?.text,
-    "🔔 Напоминание: Приближается дедлайн по задаче «Подготовить отчет по физике»"
+    "🔔 Напоминание: «Подготовить отчет по физике»"
   );
   assert.equal(sentMessages[1]?.chatId, 333444);
   assert.equal(
     sentMessages[1]?.text,
-    "🔔 Напоминание: Приближается дедлайн по задаче «Купить билеты»"
+    "🔔 Напоминание: «Купить билеты»"
   );
   assert.equal(updatedTaskIds.length, 2);
 });
@@ -134,7 +134,7 @@ test("scanReminders isolates errors when sendMessage fails for one user", async 
   assert.equal(sentMessages[0]?.chatId, 888888);
   assert.equal(
     sentMessages[0]?.text,
-    "🔔 Напоминание: Приближается дедлайн по задаче «Успешная отправка»"
+    "🔔 Напоминание: «Успешная отправка»"
   );
 });
 
@@ -305,4 +305,33 @@ test("scanReminders attaches interactive inline keyboard with done, snz1, and sn
   for (const btn of buttons) {
     assert.ok(Buffer.byteLength(btn.callback_data, "utf8") <= 64);
   }
+});
+
+test("scanReminders moves a repeating task to its next occurrence instead of closing it", async () => {
+  const sets: any[] = [];
+  const buttons: any[] = [];
+  const deadline = new Date(Math.floor(Date.now() / 1000) * 1000 - 60 * 1000);
+  const mockDb: any = {
+    select: () => ({
+      from: () => ({
+        innerJoin: () => ({
+          where: async () => [
+            { id: "t1", title: "Таблетки", deadline, userId: "u", telegramId: 1, recurrence: "daily", timezone: "Europe/Moscow" },
+          ],
+        }),
+      }),
+    }),
+    update: () => ({ set: (v: any) => { sets.push(v); return { where: async () => [] }; } }),
+  };
+  const api: TelegramSender = {
+    sendMessage: async (_c, _t, other) => { buttons.push(other?.reply_markup); return {}; },
+  };
+
+  const result = await scanReminders(mockDb, api);
+
+  assert.equal(result.reminded, 1);
+  assert.equal(sets[0].lastRemindedAt, undefined, "stays eligible for the next occurrence");
+  assert.equal(sets[0].deadline.getTime(), deadline.getTime() + 24 * 60 * 60 * 1000);
+  const callbacks = buttons[0].inline_keyboard.flat().map((b: any) => b.callback_data);
+  assert.deepEqual(callbacks, ["ack:t1", "stop:t1"]);
 });

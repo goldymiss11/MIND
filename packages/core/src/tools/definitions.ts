@@ -1,7 +1,8 @@
 import { ToolDefinition } from "../types/execution.js";
 import { Type } from "@mind/ai";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull } from "drizzle-orm";
 import { schema } from "@mind/db";
+import { isValidTimezone, parseDeadline } from "@mind/shared";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +47,8 @@ export const updateTaskTool: ToolDefinition = {
     properties: {
       taskId: { type: Type.STRING, description: "UUID задачи" },
       status: { type: Type.STRING, enum: ["inbox", "in_progress", "blocked", "completed", "cancelled"], description: "Статус задачи" },
-      deadline: { type: Type.STRING, description: "Дедлайн (опционально, ISO дата)" }
+      deadline: { type: Type.STRING, description: "Дедлайн (опционально, ISO дата)" },
+      recurrence: { type: Type.STRING, enum: ["none", "daily", "weekly", "monthly"], description: "Повтор напоминания. 'none' отключает повтор." }
     },
     required: ["taskId"]
   },
@@ -68,9 +70,16 @@ export const updateTaskTool: ToolDefinition = {
     if (deadline !== undefined) {
       if (deadline === null || deadline === "") updateData.deadline = null;
       else {
-        const parsed = new Date(deadline);
-        if (!isNaN(parsed.getTime())) updateData.deadline = parsed;
+        const parsed = parseDeadline(deadline, user.timezone);
+        if (parsed) {
+          updateData.deadline = parsed;
+          // A moved deadline has to fire again.
+          updateData.lastRemindedAt = null;
+        }
       }
+    }
+    if (args.recurrence) {
+      updateData.recurrence = args.recurrence === "none" ? null : args.recurrence;
     }
 
     const updated = await db.update(schema.tasks)
@@ -198,6 +207,31 @@ export function stripCodeFences(raw: string): string {
     .trim();
 }
 
+// Postgres holds the file bodies for now, so a single file must not eat the free database.
+export const MAX_STORED_FILE_BYTES = 10 * 1024 * 1024;
+
+export async function saveArtifact(
+  db: any,
+  values: {
+    userId: string;
+    conversationId?: string | null;
+    taskId?: string | null;
+    name: string;
+    type: string;
+    content: string | null;
+    isGost?: boolean;
+  },
+  file?: Buffer
+): Promise<string | undefined> {
+  const insert = db.insert(schema.artifacts).values({ ...values, storagePath: null });
+  const inserted = typeof insert.returning === "function" ? await insert.returning() : await insert;
+  const id = inserted?.[0]?.id as string | undefined;
+  if (id && file && file.length <= MAX_STORED_FILE_BYTES) {
+    await db.insert(schema.artifactFiles).values({ artifactId: id, data: file, sizeBytes: file.length });
+  }
+  return id;
+}
+
 export const invokeSkillTool: ToolDefinition = {
   name: "invoke_skill",
   description: "MUST use this tool to generate downloadable files: DOCX, PPTX, XLSX, as well as programming code files (.py, .sql, .cpp, .js, .ts, .html, .json). Do NOT dump raw code into chat if the user asks for a script, program or lab work — output it as a real code file! MUST use this tool to generate Excel spreadsheets (.xlsx) and PowerPoint presentations (.pptx). Do NOT output markdown tables if the user asks for a table/excel. Do NOT hallucinate download links.",
@@ -218,7 +252,7 @@ export const invokeSkillTool: ToolDefinition = {
       },
       content: { type: Type.STRING, description: "Опциональный готовый текст или JSON-контент для артефакта" },
       filename: { type: Type.STRING, description: "Опциональное имя файла (например, 'script.py', 'main.cpp', 'schema.sql')" },
-      isGost: { type: Type.BOOLEAN, description: "Применять ли оформление по ГОСТ 7.32 / 2.105 (Times New Roman 14pt, 1.5 интервал, поля 30/10/20/20 мм, абзацный отступ 1.25 см)" }
+      isGost: { type: Type.BOOLEAN, description: "Применять ли оформление по ГОСТ 7.32-2017 (титульный лист, содержание, нумерация страниц, Times New Roman 14pt, 1.5 интервал, поля 30/15/20/20 мм, абзацный отступ 1.25 см)" }
     },
     required: ["prompt"]
   },
@@ -236,18 +270,18 @@ export const invokeSkillTool: ToolDefinition = {
       /гост|реферат|курсов|лабораторн|отч[её]т|по стандарту/i.test(prompt || "")
     );
 
-    const persistArtifact = async (name: string, type: string, textContent: string | null = null) => {
+    const persistArtifact = async (name: string, type: string, textContent: string | null = null, file?: Buffer) => {
       if (db && user?.id) {
         try {
-          await db.insert(schema.artifacts).values({
+          await saveArtifact(db, {
             userId: user.id,
             conversationId: context.conversationId ?? null,
+            taskId: context.taskId ?? null,
             name,
             type,
             content: textContent,
-            storagePath: null,
-            taskId: context.taskId ?? null,
-          });
+            isGost: type === "docx" && isGost,
+          }, file);
         } catch (dbErr: any) {
           console.warn("[invokeSkillTool] Failed to persist artifact to DB:", dbErr);
         }
@@ -290,7 +324,7 @@ export const invokeSkillTool: ToolDefinition = {
     }
 
     // Guard against presentation, spreadsheet or code mistakenly routed with docx format
-    if (format === "docx" && !/(\.docx|docx|в docx|в ворд|word)/i.test(prompt)) {
+    if (!args.lockFormat && format === "docx" && !/(\.docx|docx|в docx|в ворд|word)/i.test(prompt)) {
       if (skillName === "presentation-generation" || /(\.pptx|pptx|презентаци|слайд|powerpoint)/i.test(prompt)) {
         format = "pptx";
       } else if (/(\.sql|sql|баз[аы] данных|скрипт бд|create table)/i.test(prompt)) {
@@ -430,11 +464,11 @@ export const invokeSkillTool: ToolDefinition = {
           const validated = PresentationSchema.parse(rawJson);
           const pptxBuffer = await renderPptx(validated);
           const cleanTitle = (validated.title || "презентация")
-            .replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_")
+            .replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, "_")
             .slice(0, 30);
           const artifactName = `${cleanTitle}_${Date.now()}.pptx`;
           generatedArtifacts.push({ name: artifactName, content: pptxBuffer });
-          await persistArtifact(artifactName, "pptx", null);
+          await persistArtifact(artifactName, "pptx", JSON.stringify(validated), pptxBuffer);
 
           return {
             success: true,
@@ -471,11 +505,11 @@ export const invokeSkillTool: ToolDefinition = {
           const validated = SpreadsheetSchema.parse(rawJson);
           const xlsxBuffer = await renderXlsx(validated);
           const cleanTitle = (validated.title || validated.sheetName || "таблица")
-            .replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_")
+            .replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, "_")
             .slice(0, 30);
           const artifactName = `${cleanTitle}_${Date.now()}.xlsx`;
           generatedArtifacts.push({ name: artifactName, content: xlsxBuffer });
-          await persistArtifact(artifactName, "xlsx", null);
+          await persistArtifact(artifactName, "xlsx", JSON.stringify(validated), xlsxBuffer);
 
           return {
             success: true,
@@ -514,13 +548,13 @@ export const invokeSkillTool: ToolDefinition = {
         } else {
           let cleanTitle = "code";
           if (args.title) {
-            cleanTitle = String(args.title).replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30);
+            cleanTitle = String(args.title).replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, "_").slice(0, 30);
           } else {
             const commentTitleMatch = cleanCode.match(/^(?:#|\/\/|\/\*|--)\s*(?:file:?\s*)?([a-zA-Z0-9_.-]+)/im);
             if (commentTitleMatch && commentTitleMatch[1]) {
-              cleanTitle = commentTitleMatch[1].replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30);
+              cleanTitle = commentTitleMatch[1].replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, "_").slice(0, 30);
             } else if (prompt) {
-              const promptKeywords = prompt.replace(/[^a-zA-Zа-яА-Я0-9_]/g, "_").replace(/_+/g, "_").slice(0, 20);
+              const promptKeywords = prompt.replace(/[^a-zA-Zа-яА-ЯёЁ0-9_]/g, "_").replace(/_+/g, "_").slice(0, 20);
               cleanTitle = promptKeywords || format;
             } else {
               cleanTitle = format;
@@ -543,7 +577,7 @@ export const invokeSkillTool: ToolDefinition = {
       case "docx": {
         const titleMatch = typeof skillContent === "string" ? skillContent.match(/^#\s+(.+)$/m) : null;
         const cleanTitle = titleMatch && titleMatch[1]
-          ? titleMatch[1].replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30)
+          ? titleMatch[1].replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, "_").slice(0, 30)
           : path.basename(skillName);
 
         try {
@@ -553,7 +587,7 @@ export const invokeSkillTool: ToolDefinition = {
           });
           const artifactName = `${cleanTitle}_${Date.now()}.docx`;
           generatedArtifacts.push({ name: artifactName, content: docxBuffer });
-          await persistArtifact(artifactName, "docx", skillContent);
+          await persistArtifact(artifactName, "docx", skillContent, docxBuffer);
 
           return {
             success: true,
@@ -577,7 +611,7 @@ export const invokeSkillTool: ToolDefinition = {
       case "txt": {
         const titleMatch = typeof skillContent === "string" ? skillContent.match(/^#\s+(.+)$/m) : null;
         const cleanTitle = titleMatch && titleMatch[1]
-          ? titleMatch[1].replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30)
+          ? titleMatch[1].replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, "_").slice(0, 30)
           : path.basename(skillName);
 
         const txtBuffer = Buffer.from(skillContent, "utf-8");
@@ -596,7 +630,7 @@ export const invokeSkillTool: ToolDefinition = {
       default: {
         const titleMatch = typeof skillContent === "string" ? skillContent.match(/^#\s+(.+)$/m) : null;
         const cleanTitle = titleMatch && titleMatch[1]
-          ? titleMatch[1].replace(/[^a-zA-Zа-яА-Я0-9_-]/g, "_").slice(0, 30)
+          ? titleMatch[1].replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, "_").slice(0, 30)
           : path.basename(skillName);
 
         const artifactName = `${cleanTitle}_${Date.now()}.md`;
@@ -610,5 +644,212 @@ export const invokeSkillTool: ToolDefinition = {
         };
       }
     }
+  }
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_READ_CHARS = 30000;
+const MAX_EDIT_CHARS = 200000;
+const EDITABLE_CODE_NAMES = new Set(["py", "sql", "cpp", "c", "js", "ts", "html", "css", "json"]);
+
+/** Finds a user's artifact by id, or their latest one that has editable source. */
+async function findArtifact(db: any, userId: string, artifactId?: string) {
+  const [artifact] = await db
+    .select({
+      id: schema.artifacts.id,
+      name: schema.artifacts.name,
+      type: schema.artifacts.type,
+      content: schema.artifacts.content,
+      isGost: schema.artifacts.isGost,
+    })
+    .from(schema.artifacts)
+    .where(
+      artifactId && UUID_PATTERN.test(artifactId)
+        ? and(eq(schema.artifacts.id, artifactId), eq(schema.artifacts.userId, userId))
+        : and(eq(schema.artifacts.userId, userId), isNotNull(schema.artifacts.content))
+    )
+    .orderBy(desc(schema.artifacts.createdAt))
+    .limit(1);
+  return artifact ?? null;
+}
+
+const missingSourceError =
+  "У этого файла нет сохранённого текста. Попроси пользователя прислать файл в чат, и тогда его можно будет править.";
+
+export const readArtifactTool: ToolDefinition = {
+  name: "read_artifact",
+  description: "Читает содержимое файла пользователя: созданного ранее или присланного им в чат. Используй, чтобы ответить на вопрос по файлу, пересказать или проанализировать его. Для xlsx и pptx возвращает JSON.",
+  inputSchema: {
+    type: Type.OBJECT,
+    properties: {
+      artifactId: { type: Type.STRING, description: "id файла из списка файлов пользователя. Если не указан, берётся последний файл." }
+    }
+  },
+  sideEffect: "none",
+  requiresConfirmation: false,
+  execute: async (args: any, context: any) => {
+    const artifact = await findArtifact(context.db, context.user.id, args.artifactId?.trim());
+    if (!artifact) return { success: false, error: "Файл не найден." };
+    if (!artifact.content) return { success: false, error: missingSourceError };
+    return {
+      success: true,
+      name: artifact.name,
+      type: artifact.type,
+      content: artifact.content.slice(0, MAX_READ_CHARS),
+      truncated: artifact.content.length > MAX_READ_CHARS,
+    };
+  }
+};
+
+const ARTIFACT_TYPE_TO_FORMAT: Record<string, string> = {
+  markdown: "md",
+  pdf: "docx",
+};
+
+export const editArtifactTool: ToolDefinition = {
+  name: "edit_artifact",
+  description: "Вносит правки в существующий файл пользователя и отправляет новую версию в том же формате. Используй для любых просьб дополнить, исправить, переписать или переоформить файл, созданный ранее или присланный в чат. PDF редактируется и отправляется как docx.",
+  inputSchema: {
+    type: Type.OBJECT,
+    properties: {
+      artifactId: { type: Type.STRING, description: "id файла из списка файлов пользователя. Если не указан, берётся последний файл." },
+      instruction: { type: Type.STRING, description: "Что именно нужно изменить, со всеми подробностями из запроса" },
+      isGost: { type: Type.BOOLEAN, description: "Оформить результат по ГОСТ (только для docx)" }
+    },
+    required: ["instruction"]
+  },
+  sideEffect: "internal_write",
+  requiresConfirmation: false,
+  execute: async (args: any, context: any) => {
+    const { ai, db, user } = context;
+    const instruction = args.instruction?.trim();
+    if (!instruction) return { success: false, error: "instruction is required" };
+
+    const artifact = await findArtifact(db, user.id, args.artifactId?.trim());
+    if (!artifact) return { success: false, error: "Файл не найден." };
+    if (!artifact.content) return { success: false, error: missingSourceError };
+    if (artifact.content.length > MAX_EDIT_CHARS) {
+      return { success: false, error: "Файл слишком большой для правки целиком. Предложи пользователю разбить его на части." };
+    }
+
+    const format = ARTIFACT_TYPE_TO_FORMAT[artifact.type] ?? artifact.type;
+    const sourceKind =
+      format === "xlsx" || format === "pptx"
+        ? "JSON той же структуры. Верни только валидный JSON, без markdown-обёртки."
+        : format === "docx" || format === "md"
+          ? "Markdown. Если в начале есть блок --- с полями титульного листа, сохрани его."
+          : "исходный текст файла как есть, без markdown-обёртки.";
+
+    const response = await ai.generateText(
+      `Текущее содержимое файла «${artifact.name}»:\n\n${artifact.content}\n\nЧто нужно изменить:\n${instruction}`,
+      {
+        tier: "complex",
+        systemInstruction: `Ты редактируешь файл пользователя. Внеси только запрошенные изменения, всё остальное сохрани дословно. Верни ПОЛНОЕ обновлённое содержимое, никогда не сокращай его фразами вроде «остальное без изменений». Формат ответа: ${sourceKind} Без пояснений до и после.`,
+      }
+    );
+    if (context.logAiRun) await context.logAiRun("edit_artifact", response);
+
+    const wrapped = response?.result?.trim().match(/^```[a-zA-Z]*\r?\n([\s\S]*)\r?\n```$/);
+    const updated = (wrapped?.[1] ?? response?.result ?? "").trim();
+    if (!updated) return { success: false, error: "Правка вернула пустой результат. Файл не изменён." };
+
+    const asksToShorten = /сократ|удал|короче|убер|сожми|убрать|кратк/i.test(instruction);
+    if (!asksToShorten && updated.length < artifact.content.length * 0.5) {
+      return { success: false, error: "Правка потеряла большую часть содержимого, поэтому файл не изменён. Сообщи об этом пользователю и предложи уточнить, что поменять." };
+    }
+
+    const result = await invokeSkillTool.execute(
+      {
+        prompt: instruction,
+        format,
+        lockFormat: true,
+        content: updated,
+        isGost: args.isGost === true || artifact.isGost,
+        filename: EDITABLE_CODE_NAMES.has(format) ? artifact.name : undefined,
+      },
+      context
+    );
+    return result;
+  }
+};
+
+
+
+export const listMemoriesTool: ToolDefinition = {
+  name: "list_memories",
+  description: "Показывает, что сохранено в памяти о пользователе. Используй, когда он спрашивает, что ты о нём знаешь или помнишь.",
+  inputSchema: { type: Type.OBJECT, properties: {} },
+  sideEffect: "none",
+  requiresConfirmation: false,
+  execute: async (_args: any, context: any) => {
+    const rows = await context.db
+      .select({ id: schema.memories.id, type: schema.memories.type, content: schema.memories.content })
+      .from(schema.memories)
+      .where(eq(schema.memories.userId, context.user.id))
+      .orderBy(desc(schema.memories.createdAt))
+      .limit(50);
+    return { success: true, memories: rows };
+  }
+};
+
+export const forgetMemoryTool: ToolDefinition = {
+  name: "forget_memory",
+  description: "Удаляет факт из памяти о пользователе, когда он просит что-то забыть или говорит, что факт неверен. Если совпадений несколько, ничего не удаляет и возвращает варианты: уточни у пользователя или вызови снова с memoryId.",
+  inputSchema: {
+    type: Type.OBJECT,
+    properties: {
+      memoryId: { type: Type.STRING, description: "id факта, если известен" },
+      query: { type: Type.STRING, description: "Ключевое слово из текста факта" }
+    }
+  },
+  sideEffect: "internal_write",
+  requiresConfirmation: false,
+  execute: async (args: any, context: any) => {
+    const { db, user } = context;
+    const memoryId = args.memoryId?.trim();
+    const query = args.query?.trim();
+    if (!memoryId && !query) return { success: false, error: "Укажи memoryId или query" };
+
+    const fields = { id: schema.memories.id, content: schema.memories.content };
+    const matches = await db
+      .select(fields)
+      .from(schema.memories)
+      .where(
+        memoryId && UUID_PATTERN.test(memoryId)
+          ? and(eq(schema.memories.id, memoryId), eq(schema.memories.userId, user.id))
+          : and(eq(schema.memories.userId, user.id), ilike(schema.memories.content, `%${query ?? ""}%`))
+      )
+      .limit(6);
+
+    if (matches.length === 0) return { success: false, error: "Такого факта в памяти нет." };
+    if (matches.length > 1) return { success: false, needsChoice: true, matches };
+
+    await db.delete(schema.memories).where(and(eq(schema.memories.id, matches[0].id), eq(schema.memories.userId, user.id)));
+    return { success: true, forgotten: matches[0].content };
+  }
+};
+
+export const setTimezoneTool: ToolDefinition = {
+  name: "set_timezone",
+  description: "Сохраняет часовой пояс пользователя, когда он называет свой город или часовой пояс. От него зависит время напоминаний.",
+  inputSchema: {
+    type: Type.OBJECT,
+    properties: {
+      timezone: { type: Type.STRING, description: "Идентификатор IANA, например Europe/Moscow, Asia/Yekaterinburg" }
+    },
+    required: ["timezone"]
+  },
+  sideEffect: "internal_write",
+  requiresConfirmation: false,
+  execute: async (args: any, context: any) => {
+    const timezone = args.timezone?.trim();
+    if (!timezone || !isValidTimezone(timezone)) {
+      return { success: false, error: `Неизвестный часовой пояс: ${timezone}. Нужен идентификатор IANA.` };
+    }
+    await context.db
+      .update(schema.users)
+      .set({ timezone, updatedAt: new Date() })
+      .where(eq(schema.users.id, context.user.id));
+    return { success: true, timezone };
   }
 };

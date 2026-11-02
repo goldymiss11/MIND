@@ -4,10 +4,6 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["pg", "@mind/db"],
   },
-  typescript: {
-    // Typecheck is verified locally and in CI; saves ~500MB RAM during Render build
-    ignoreBuildErrors: true,
-  },
   eslint: {
     ignoreDuringBuilds: true,
   },

@@ -33,6 +33,7 @@ export interface ExecutionRequest {
   source?: string;
   imageBase64?: string;
   mimeType?: string;
+  images?: Array<{ data: string; mimeType: string }>;
 }
 
 export interface ExecutionResult {

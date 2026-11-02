@@ -104,10 +104,10 @@ export function DashboardClient({
     startTransition(async () => {
       try {
         const [m, a, act, ai] = await Promise.all([
-          getMetrics(),
-          getAudienceStats(),
-          getRecentActivity(),
-          getAiMetrics(),
+          getMetrics(adminSecret),
+          getAudienceStats(adminSecret),
+          getRecentActivity(adminSecret),
+          getAiMetrics(adminSecret),
         ]);
         setMetrics(m);
         setAudienceStats(a);

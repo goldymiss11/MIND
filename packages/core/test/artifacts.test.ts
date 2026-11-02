@@ -410,9 +410,9 @@ test("markdownToDocx: formats document according to academic GOST standards when
   assert.ok(docXml, "document.xml must exist in docx");
   assert.ok(stylesXml, "styles.xml must exist in docx");
 
-  // 1. Page Margins: Left 30mm (1700), Right 10mm (567), Top 20mm (1134), Bottom 20mm (1134)
+  // 1. Page Margins: Left 30mm (1700), Right 15mm (850), Top 20mm (1134), Bottom 20mm (1134)
   assert.ok(docXml.includes('w:left="1700"'), "Left margin must be 1700 twips (30mm)");
-  assert.ok(docXml.includes('w:right="567"'), "Right margin must be 567 twips (10mm)");
+  assert.ok(docXml.includes('w:right="850"'), "Right margin must be 850 twips (15mm, ГОСТ 7.32-2017)");
   assert.ok(docXml.includes('w:top="1134"'), "Top margin must be 1134 twips (20mm)");
   assert.ok(docXml.includes('w:bottom="1134"'), "Bottom margin must be 1134 twips (20mm)");
 
@@ -421,8 +421,8 @@ test("markdownToDocx: formats document according to academic GOST standards when
   assert.ok(stylesXml.includes('w:sz w:val="28"'), "Default size must be 28 (14pt)");
   assert.ok(stylesXml.includes('w:line="360"'), "Default line spacing must be 360 (1.5 lines)");
 
-  // 3. Paragraph Indent & Alignment: 1.25 cm (720 twips) indent, justified alignment (both)
-  assert.ok(docXml.includes('w:firstLine="720"'), "Paragraph indent must be 720 twips (1.25cm)");
+  // 3. Paragraph Indent & Alignment: 1.25 cm (709 twips) indent, justified alignment (both)
+  assert.ok(docXml.includes('w:firstLine="709"'), "Paragraph indent must be 709 twips (1.25cm)");
   assert.ok(docXml.includes('w:jc w:val="both"'), "Paragraph alignment must be justified ('both')");
 });
 

@@ -7,4 +7,4 @@ dist
 .env.*
 !.env.example
 *.log
-brain_badge*.png
+assets

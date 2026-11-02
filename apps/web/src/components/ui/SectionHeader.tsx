@@ -1,32 +1,22 @@
 import React from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
 
 interface SectionHeaderProps {
   title: string;
+  /** Muted text on the right, such as a total. */
+  aside?: React.ReactNode;
   actionHref?: string;
   actionLabel?: string;
-  className?: string;
 }
 
-export function SectionHeader({
-  title,
-  actionHref,
-  actionLabel = "Все",
-  className = "",
-}: SectionHeaderProps) {
+export function SectionHeader({ title, aside, actionHref, actionLabel = "Все" }: SectionHeaderProps) {
   return (
-    <div
-      className={`flex justify-between items-center text-[15px] font-semibold text-white px-1 mb-2.5 ${className}`}
-    >
-      <span>{title}</span>
+    <div className="mt-3 flex items-baseline justify-between px-1.5 pb-0.5">
+      <h2 className="text-[20px] font-bold text-hint">{title}</h2>
+      {aside && <span className="text-[15px] text-hint">{aside}</span>}
       {actionHref && (
-        <Link
-          href={actionHref}
-          className="inline-flex items-center gap-0.5 text-[#007aff] text-xs font-semibold hover:opacity-85 active:opacity-70 transition-opacity"
-        >
-          <span>{actionLabel}</span>
-          <ChevronRight size={14} strokeWidth={2.5} />
+        <Link href={actionHref} className="text-[15px] font-medium text-accent active:opacity-60">
+          {actionLabel}
         </Link>
       )}
     </div>

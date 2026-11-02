@@ -2,69 +2,43 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, CheckSquare, Brain, FileText, Settings } from "lucide-react";
+import { Brain, CheckCircle2, FolderClosed, Home } from "lucide-react";
+
+const NAV_ITEMS = [
+  { href: "/", label: "Главная", icon: Home },
+  { href: "/tasks", label: "Задачи", icon: CheckCircle2 },
+  { href: "/memory", label: "Память", icon: Brain },
+  { href: "/artifacts", label: "Файлы", icon: FolderClosed },
+];
 
 export function Navigation() {
   const pathname = usePathname();
 
-  // Hide navigation in admin dashboard
-  if (pathname?.startsWith("/admin")) {
+  if (pathname?.startsWith("/admin") || pathname?.startsWith("/settings")) {
     return null;
   }
-
-  const navItems = [
-    { href: "/", label: "Главная", icon: Home },
-    { href: "/tasks", label: "Задачи", icon: CheckSquare },
-    { href: "/memory", label: "Память", icon: Brain },
-    { href: "/artifacts", label: "Файлы", icon: FileText },
-    { href: "/settings", label: "Настройки", icon: Settings },
-  ];
-
-  const handleTabClick = () => {
-    if (typeof window !== "undefined" && window.Telegram?.WebApp?.HapticFeedback) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.selectionChanged();
-      } catch {
-        // Safe ignore
-      }
-    }
-  };
 
   return (
     <nav
       aria-label="Основная навигация"
-      className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] inset-x-0 mx-auto w-[calc(100%-1.5rem)] max-w-[390px] z-40 pointer-events-none"
+      className="pointer-events-none fixed inset-x-0 bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-40 mx-auto w-[calc(100%-1.5rem)] max-w-[456px]"
     >
-      <div className="pointer-events-auto relative rounded-full p-1 flex justify-between items-center glass-dock">
-        {navItems.map((item) => {
+      <div className="glass-dock pointer-events-auto flex items-center rounded-full p-[5px]">
+        {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href;
           const Icon = item.icon;
-
           return (
             <Link
               key={item.href}
               href={item.href}
-              onClick={handleTabClick}
-              className={`relative flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-full transition-all duration-150 select-none ${
-                isActive
-                  ? "glass-pill-active text-[#007aff]"
-                  : "text-[#8e8e93] hover:text-white/90 hover:bg-white/[0.04] active:scale-95"
+              aria-current={isActive ? "page" : undefined}
+              onClick={() => window.Telegram?.WebApp?.HapticFeedback?.selectionChanged()}
+              className={`flex h-[52px] flex-1 select-none flex-col items-center justify-center gap-0.5 rounded-full transition-colors duration-150 ${
+                isActive ? "bg-ink/10 text-accent" : "text-ink/85"
               }`}
             >
-              <Icon
-                size={20}
-                strokeWidth={isActive ? 2.4 : 2}
-                className={`transition-colors duration-150 ${
-                  isActive ? "text-[#007aff]" : "text-[#8e8e93]"
-                }`}
-              />
-              <span
-                className={`text-[10px] tracking-tight mt-1 leading-none select-none transition-colors duration-150 ${
-                  isActive ? "text-[#007aff] font-semibold" : "text-[#8e8e93] font-medium"
-                }`}
-              >
-                {item.label}
-              </span>
+              <Icon size={23} strokeWidth={2.2} />
+              <span className="text-[11px] font-semibold leading-none">{item.label}</span>
             </Link>
           );
         })}
@@ -72,4 +46,3 @@ export function Navigation() {
     </nav>
   );
 }
-

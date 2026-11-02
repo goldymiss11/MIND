@@ -5,6 +5,9 @@ import {
   text,
   timestamp,
   index,
+  integer,
+  boolean,
+  customType,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { users } from "./users.js";
@@ -26,6 +29,7 @@ export const artifacts = pgTable(
     type: varchar("type", { length: 50 }).notNull(),
     content: text("content"),
     storagePath: varchar("storage_path"),
+    isGost: boolean("is_gost").default(false).notNull(),
     taskId: uuid("task_id").references(() => tasks.id, {
       onDelete: "set null",
     }),
@@ -43,6 +47,24 @@ export const artifacts = pgTable(
     index("artifacts_created_at_idx").on(table.createdAt),
   ]
 );
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
+
+/**
+ * Binary file bodies live apart from `artifacts` so listing artifacts never loads them.
+ */
+export const artifactFiles = pgTable("artifact_files", {
+  artifactId: uuid("artifact_id")
+    .primaryKey()
+    .references(() => artifacts.id, { onDelete: "cascade" }),
+  data: bytea("data").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
 
 export const artifactsRelations = relations(artifacts, ({ one }) => ({
   user: one(users, {

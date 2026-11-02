@@ -6,4 +6,4 @@ export * from "./agent_runs.js";
 export * from "./projects.js";
 export * from "./tasks.js";
 export * from "./artifacts.js";
-
+export * from "./feedback.js";

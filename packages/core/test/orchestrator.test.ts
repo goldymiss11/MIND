@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { OrchestratorService } from "../src/services/orchestrator.service.js";
+import { OrchestratorService, isSmallTalk } from "../src/services/orchestrator.service.js";
 import { toolRegistry } from "../src/tools/registry.js";
 import { schema } from "@mind/db";
 
@@ -659,7 +659,7 @@ test("OrchestratorService: forwards imageBase64 and mimeType to ai.generateText"
   assert.equal(capturedOptions.mimeType, "image/png");
 });
 
-test("OrchestratorService: injects last created artifact into system prompt for continuation", async () => {
+test("OrchestratorService: lists user files in system prompt without their content", async () => {
   let capturedSystemInstruction = "";
   const mockDb: any = {
     query: {
@@ -704,26 +704,12 @@ test("OrchestratorService: injects last created artifact into system prompt for 
   await svc.execute({ telegramUserId: 777, text: "Дополни файл второй главой" });
 
   assert.ok(
-    capturedSystemInstruction.includes("ПОСЛЕДНИЙ СОЗДАННЫЙ ДОКУМЕНТ ПОЛЬЗОВАТЕЛЯ:"),
-    "System instruction must contain last created document header"
+    capturedSystemInstruction.includes("id: art-1, «Реферат_по_математике_123.docx», тип: docx"),
+    "System instruction must list the user's files with their ids"
   );
   assert.ok(
-    capturedSystemInstruction.includes("- Название: Реферат_по_математике_123.docx"),
-    "System instruction must include artifact name"
-  );
-  assert.ok(
-    capturedSystemInstruction.includes("- Тип: docx"),
-    "System instruction must include artifact type"
-  );
-  assert.ok(
-    capturedSystemInstruction.includes("# Реферат по дискретной математике"),
-    "System instruction must include artifact content"
-  );
-  assert.ok(
-    capturedSystemInstruction.includes(
-      "Если пользователь просит дополнить, исправить, продолжить или переписать ранее созданный документ (например, 'добавь главу', 'исправь введение', 'допиши вывод'), ты ДОЛЖЕН взять содержимое последнего документа, применить изменения и передать полный обновлённый текст в инструмент `invoke_skill`."
-    ),
-    "System instruction must include continuation directive"
+    !capturedSystemInstruction.includes("ФАЙЛЫ ПОЛЬЗОВАТЕЛЯ (сначала самые новые):\n- id: art-1, «Реферат_по_математике_123.docx», тип: docx\n#"),
+    "File content must stay out of the system prompt and be read through tools"
   );
 });
 
@@ -869,7 +855,10 @@ test("OrchestratorService: executes multi-file Submission Package (.py + .docx) 
   assert.ok(res.response.includes("Лабораторная работа готова"));
 });
 
-
-
-
-
+test("isSmallTalk: recognizes greetings but not requests", () => {
+  assert.equal(isSmallTalk("Привет!"), true);
+  assert.equal(isSmallTalk("спасибо"), true);
+  assert.equal(isSmallTalk("ок"), true);
+  assert.equal(isSmallTalk("привет, напомни позвонить маме"), false);
+  assert.equal(isSmallTalk("да, сделай презентацию"), false);
+});

@@ -435,6 +435,8 @@ test("registerBotCommands: calls setMyCommands with /start, /tasks, and /memory"
     { command: "start", description: "Запустить/Перезапустить" },
     { command: "tasks", description: "Мои активные задачи" },
     { command: "memory", description: "Последние воспоминания" },
+    { command: "timezone", description: "Часовой пояс для напоминаний" },
+    { command: "limits", description: "Сколько запросов осталось сегодня" },
   ]);
 });
 
@@ -1471,4 +1473,195 @@ test("setupBot: handles /digest command to toggle digestEnabled setting", async 
   assert.ok(msg2.includes("Утренняя сводка включена"));
 });
 
+const TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11";
 
+function textUpdate(id: number, text: string) {
+  return {
+    update_id: id,
+    message: {
+      message_id: id,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      text,
+    },
+  } as any;
+}
+
+function recordCalls(bot: Bot) {
+  const calls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    calls.push({ method, payload });
+    const result = method === "getFile" ? { file_id: "f1", file_path: "documents/a.docx" } : { message_id: 1 };
+    return { ok: true, result: result as any };
+  });
+  return calls;
+}
+
+test("setupBot: sends AI replies as HTML and falls back to plain text", async () => {
+  const bot = setupBot(TOKEN, { handleIncomingMessage: async () => ({ text: "**Готово** <ok>" }) }, {
+    config: { botInfo: testBotInfo },
+    rateLimits: { perMinute: 10, perDay: 10 },
+  });
+  const calls: Array<{ method: string; payload: any }> = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === "sendMessage" && (payload as any).parse_mode === "HTML") {
+      throw new Error("Bad Request: can't parse entities");
+    }
+    return { ok: true, result: { message_id: 1 } as any };
+  });
+
+  await bot.handleUpdate(textUpdate(1, "привет"));
+
+  const sends = calls.filter((c) => c.method === "sendMessage");
+  assert.equal(sends[0]?.payload.text, "<b>Готово</b> &lt;ok&gt;");
+  assert.equal(sends[1]?.payload.text, "**Готово** <ok>");
+});
+
+test("setupBot: rate limit stops AI calls and tells the user", async () => {
+  let aiCalls = 0;
+  const bot = setupBot(TOKEN, { handleIncomingMessage: async () => { aiCalls++; return { text: "ok" }; } }, {
+    config: { botInfo: testBotInfo },
+    rateLimits: { perMinute: 1, perDay: 10 },
+  });
+  const calls = recordCalls(bot);
+
+  await bot.handleUpdate(textUpdate(1, "раз"));
+  await bot.handleUpdate(textUpdate(2, "два"));
+
+  assert.equal(aiCalls, 1);
+  assert.match(calls.at(-1)?.payload.text, /Подожди минуту/);
+});
+
+test("setupBot: background mode returns before the AI finishes", async () => {
+  let release = () => {};
+  const finished = new Promise<void>((resolve) => { release = resolve; });
+  const bot = setupBot(TOKEN, { handleIncomingMessage: async () => { await finished; return { text: "готово" }; } }, {
+    config: { botInfo: testBotInfo },
+    background: true,
+  });
+  const calls = recordCalls(bot);
+
+  await bot.handleUpdate(textUpdate(1, "долгая задача"));
+  assert.equal(calls.some((c) => c.method === "sendMessage"), false);
+
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(calls.find((c) => c.method === "sendMessage")?.payload.text, "готово");
+});
+
+test("setupBot: passes a sent document to the orchestrator", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Blob(["docx bytes"]), { status: 200 });
+  let received: any = null;
+  try {
+    const bot = setupBot(TOKEN, {
+      handleIncomingMessage: async () => ({ text: "x" }),
+      handleIncomingFile: async (_u, file) => { received = file; return { text: "Получил" }; },
+    }, { config: { botInfo: testBotInfo } });
+    const calls = recordCalls(bot);
+
+    await bot.handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 0,
+        chat: { id: 998877, type: "private" },
+        from: { id: 112233, is_bot: false, first_name: "Alex" },
+        caption: "исправь введение",
+        document: { file_id: "f1", file_unique_id: "u", file_name: "a.docx", file_size: 10 },
+      },
+    } as any);
+
+    assert.equal(received.name, "a.docx");
+    assert.equal(received.caption, "исправь введение");
+    assert.equal(received.data.toString(), "docx bytes");
+    assert.equal(calls.find((c) => c.method === "sendMessage")?.payload.text, "Получил");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("setupBot: rejects oversized documents without downloading them", async () => {
+  const bot = setupBot(TOKEN, {
+    handleIncomingMessage: async () => ({ text: "x" }),
+    handleIncomingFile: async () => { throw new Error("must not be called"); },
+  }, { config: { botInfo: testBotInfo } });
+  const calls = recordCalls(bot);
+
+  await bot.handleUpdate({
+    update_id: 1,
+    message: {
+      message_id: 1,
+      date: 0,
+      chat: { id: 998877, type: "private" },
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      document: { file_id: "f1", file_unique_id: "u", file_name: "big.pdf", file_size: 25 * 1024 * 1024 },
+    },
+  } as any);
+
+  assert.equal(calls.some((c) => c.method === "getFile"), false);
+  assert.match(calls[0]?.payload.text, /до 20 МБ/);
+});
+
+test("setupBot: collects an album into one request", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Blob(["img"]), { status: 200 });
+  const received: any[] = [];
+  try {
+    const bot = setupBot(TOKEN, {
+      handleIncomingMessage: async (_u, text, _c, options) => { received.push({ text, options }); return { text: "ok" }; },
+    }, { config: { botInfo: testBotInfo } });
+    recordCalls(bot);
+
+    const photo = (id: number, caption?: string) => ({
+      update_id: id,
+      message: {
+        message_id: id,
+        date: 0,
+        media_group_id: "g1",
+        caption,
+        chat: { id: 998877, type: "private" },
+        from: { id: 112233, is_bot: false, first_name: "Alex" },
+        photo: [{ file_id: `p${id}`, file_unique_id: `u${id}`, width: 1, height: 1 }],
+      },
+    });
+    await bot.handleUpdate(photo(1, "сравни") as any);
+    await bot.handleUpdate(photo(2) as any);
+    await new Promise((r) => setTimeout(r, 1400));
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0].text, "сравни");
+    assert.equal(received[0].options.images.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("setupBot: stop action ends a repeating reminder", async () => {
+  const updates: any[] = [];
+  const mockDb: any = {
+    select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ id: "x", userId: "x" }] }) }) }),
+    update: () => ({ set: (v: any) => { updates.push(v); return { where: async () => [] }; } }),
+  };
+  const bot = setupBot(TOKEN, { handleIncomingMessage: async () => ({ text: "x" }) }, {
+    config: { botInfo: testBotInfo },
+    database: mockDb,
+  });
+  recordCalls(bot);
+
+  await bot.handleUpdate({
+    update_id: 1,
+    callback_query: {
+      id: "c1",
+      from: { id: 112233, is_bot: false, first_name: "Alex" },
+      chat_instance: "i",
+      data: "stop:task-1",
+      message: { message_id: 1, date: 0, chat: { id: 998877, type: "private" } },
+    },
+  } as any);
+
+  assert.equal(updates[0].recurrence, null);
+  assert.equal(updates[0].status, "completed");
+});

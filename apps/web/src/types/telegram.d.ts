@@ -1,5 +1,11 @@
 interface TelegramWebApp {
   ready: () => void;
+  setHeaderColor?: (color: string) => void;
+  setBackgroundColor?: (color: string) => void;
+  setBottomBarColor?: (color: string) => void;
+  disableVerticalSwipes?: () => void;
+  onEvent?: (event: string, callback: () => void) => void;
+  offEvent?: (event: string, callback: () => void) => void;
   expand: () => void;
   close: () => void;
   initData: string;
@@ -12,6 +18,7 @@ interface TelegramWebApp {
       username?: string;
       language_code?: string;
       is_premium?: boolean;
+      photo_url?: string;
     };
     auth_date?: number;
     hash?: string;

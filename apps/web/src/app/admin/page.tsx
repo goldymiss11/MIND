@@ -13,11 +13,11 @@ interface PageProps {
 }
 
 export default async function AdminPage({ searchParams }: PageProps) {
-  const adminSecret = process.env.ADMIN_SECRET || "founder_super_secret_2026";
+  const adminSecret = process.env.ADMIN_SECRET;
   const userSecret = searchParams?.secret;
 
   // Basic security check: require ?secret=ADMIN_SECRET
-  if (!userSecret || userSecret !== adminSecret) {
+  if (!adminSecret || !userSecret || userSecret !== adminSecret) {
     return (
       <div className="min-h-screen bg-[#090a0f] text-zinc-100 flex items-center justify-center p-4 selection:bg-red-500 selection:text-white">
         <div className="max-w-md w-full rounded-3xl bg-zinc-900/80 backdrop-blur-xl border border-zinc-800/80 p-8 text-center space-y-5 shadow-2xl shadow-black/80">
@@ -50,10 +50,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
   // Real data fetching via @mind/db server actions
   const [metrics, audienceStats, activities, aiData] = await Promise.all([
-    getMetrics(),
-    getAudienceStats(),
-    getRecentActivity(),
-    getAiMetrics(),
+    getMetrics(userSecret),
+    getAudienceStats(userSecret),
+    getRecentActivity(userSecret),
+    getAiMetrics(userSecret),
   ]);
 
   return (

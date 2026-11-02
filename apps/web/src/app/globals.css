@@ -2,128 +2,139 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Wallet keeps its own palette and only follows Telegram's light/dark choice,
+ * so the theme colours are ours and data-theme switches between them.
+ * Colours are RGB channels so Tailwind can apply opacity (bg-accent/15).
+ */
 :root {
-  --tg-theme-bg-color: #000000;
-  --tg-theme-text-color: #ffffff;
-  --tg-theme-hint-color: #8e8e93;
-  --tg-theme-link-color: #007aff;
-  --tg-theme-button-color: #007aff;
-  --tg-theme-button-text-color: #ffffff;
-  --tg-theme-secondary-bg-color: #16171b;
-
-  --wallet-bg: #000000;
-  --wallet-card: #16171b;
-  --wallet-card-hover: #1c1d22;
-  --wallet-card-inner: #202127;
-  --wallet-subcard: #24252c;
-  --wallet-border: rgba(255, 255, 255, 0.07);
-  --wallet-blue: #007aff;
-  --wallet-green: #30d158;
-  --wallet-muted: #8e8e93;
+  --page: 28 28 30;
+  --card: 44 44 46;
+  --card-raised: 58 58 60;
+  --ink: 255 255 255;
+  --hint: 142 142 147;
+  --accent: 64 137 245;
+  --good: 48 209 88;
+  --warn: 255 159 10;
+  --bad: 255 69 58;
+  --purple: 175 82 222;
+  --line: 255 255 255;
+  --line-alpha: 0.09;
+  --dock: 44 44 46;
+  color-scheme: dark;
 }
 
-html, body {
-  background-color: #000000;
-  color: #ffffff;
+:root[data-theme="light"] {
+  --page: 242 242 247;
+  --card: 255 255 255;
+  --card-raised: 229 229 234;
+  --ink: 0 0 0;
+  --hint: 110 110 115;
+  --accent: 0 113 235;
+  --good: 30 160 70;
+  --warn: 210 125 0;
+  --bad: 220 50 40;
+  --purple: 150 60 200;
+  --line: 0 0 0;
+  --line-alpha: 0.08;
+  --dock: 255 255 255;
+  color-scheme: light;
+}
+
+html,
+body {
+  background-color: rgb(var(--page));
+  color: rgb(var(--ink));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
-  -ms-overflow-style: none;
   scrollbar-width: none;
   overscroll-behavior-y: none;
 }
 
-html::-webkit-scrollbar, body::-webkit-scrollbar {
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
   display: none;
 }
 
 body {
-  padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
-  min-height: 100vh;
   min-height: 100dvh;
 }
 
-/* Telegram Wallet Card Styling */
-.wallet-card {
-  background-color: #16171b;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 24px;
-  overflow: hidden;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45);
+@layer components {
+  .screen {
+    @apply mx-auto flex min-h-dvh w-full max-w-[480px] flex-col gap-3 px-4 pt-3;
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .group-card {
+    @apply overflow-hidden rounded-[22px] bg-card;
+  }
+
+  .pressable {
+    @apply cursor-pointer select-none transition-transform duration-150 active:scale-[0.97];
+  }
+
+  .row-press {
+    @apply cursor-pointer select-none transition-colors duration-100 active:bg-ink/[0.06];
+  }
+
+  .field {
+    @apply w-full rounded-2xl border-0 bg-ink/[0.07] px-4 py-3.5 text-[16px] text-ink outline-none placeholder:text-hint focus:ring-2 focus:ring-accent;
+  }
+
+  .btn-primary {
+    @apply flex h-[54px] w-full items-center justify-center gap-2 rounded-full bg-accent text-[17px] font-semibold text-white transition-transform duration-150 active:scale-[0.98] disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply flex h-[54px] w-full items-center justify-center gap-2 rounded-full bg-ink/[0.08] text-[17px] font-semibold text-ink transition-transform duration-150 active:scale-[0.98];
+  }
 }
 
-.wallet-card-pressable {
-  background-color: #16171b;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 24px;
-  overflow: hidden;
-  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1), background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.wallet-card-pressable:active {
-  transform: scale(0.985);
-  background-color: #1c1d22;
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
-.wallet-subcard {
-  background-color: #202127;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 18px;
-}
-
-/* Glass Dock Styles - Telegram Wallet Floating Dock */
-.glass-dock {
+/* Inset separators start after the row icon, as in iOS grouped lists. */
+.rows > * + * {
   position: relative;
-  background: linear-gradient(180deg, rgba(22, 23, 27, 0.82) 0%, rgba(14, 15, 18, 0.92) 100%);
-  backdrop-filter: blur(28px) saturate(200%) contrast(102%) brightness(105%);
-  -webkit-backdrop-filter: blur(28px) saturate(200%) contrast(102%) brightness(105%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-top-color: rgba(255, 255, 255, 0.28);
-  border-bottom-color: rgba(255, 255, 255, 0.06);
-  box-shadow: 
-    0 20px 48px -6px rgba(0, 0, 0, 0.9),
-    0 8px 16px -2px rgba(0, 0, 0, 0.5),
-    inset 0 1px 1px 0 rgba(255, 255, 255, 0.25),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
-.glass-dock::before {
+.rows > * + *::before {
   content: "";
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(120% 70% at 50% 0%, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.01) 60%, transparent 100%);
-  pointer-events: none;
+  top: 0;
+  right: 16px;
+  left: var(--separator-inset, 74px);
+  height: 1px;
+  background: rgb(var(--line) / var(--line-alpha));
 }
 
-.glass-pill-active {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+.glass-dock {
+  background: rgb(var(--dock) / 0.72);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    0 12px 32px -8px rgb(0 0 0 / 0.5),
+    inset 0 0 0 1px rgb(var(--line) / 0.12);
 }
 
-
-/* Micro-interaction touch scale */
-.touch-scale {
-  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1), opacity 0.15s ease;
+.promo-gradient {
+  background: linear-gradient(100deg, #1f8efa 0%, #2ea6ff 55%, #6cc9ff 100%);
 }
 
-.touch-scale:active {
-  transform: scale(0.95);
-  opacity: 0.88;
+/* Corner ribbon on file tiles. */
+.ribbon {
+  position: absolute;
+  top: 13px;
+  right: -26px;
+  width: 92px;
+  transform: rotate(45deg);
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  color: #fff;
 }
 
-.touch-subtle {
-  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
-}
-
-.touch-subtle:active {
-  transform: scale(0.98);
-}
-
-/* Skeleton Shimmer */
-@keyframes walletShimmer {
+@keyframes shimmer {
   0% {
     background-position: -200% 0;
   }
@@ -133,28 +144,42 @@ body {
 }
 
 .skeleton-shimmer {
-  background: linear-gradient(90deg, #16171b 25%, #222329 50%, #16171b 75%);
+  background: linear-gradient(
+    90deg,
+    rgb(var(--card)) 25%,
+    rgb(var(--card-raised)) 50%,
+    rgb(var(--card)) 75%
+  );
   background-size: 200% 100%;
-  animation: walletShimmer 1.8s ease-in-out infinite;
+  animation: shimmer 1.8s ease-in-out infinite;
 }
 
-/* Sheet Slide Up Animation */
 @keyframes sheetSlideUp {
   from {
     transform: translateY(100%);
-    opacity: 0;
   }
   to {
     transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
     opacity: 1;
   }
 }
 
 .animate-sheet-up {
-  animation: sheetSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: sheetSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Scrollbar hiding utilities */
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out both;
+}
+
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -164,9 +189,10 @@ body {
   scrollbar-width: none;
 }
 
-/* Accessibility: Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
+  *,
+  ::before,
+  ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
