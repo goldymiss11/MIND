@@ -3,64 +3,48 @@ import { ChevronRight } from "lucide-react";
 
 interface RowItemProps {
   icon?: React.ReactNode;
-  iconBg?: string;
-  iconColor?: string;
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   right?: React.ReactNode;
+  rightSub?: React.ReactNode;
   showChevron?: boolean;
+  /** Let the title wrap instead of cutting it to one line. */
+  wrap?: boolean;
   onClick?: () => void;
   className?: string;
 }
 
 export function RowItem({
   icon,
-  iconBg = "bg-[#007aff]/15",
-  iconColor = "text-[#007aff]",
   title,
   subtitle,
   right,
+  rightSub,
   showChevron = false,
+  wrap = false,
   onClick,
   className = "",
 }: RowItemProps) {
-  const isClickable = Boolean(onClick);
-
   return (
     <div
       onClick={onClick}
-      className={`px-4 py-3.5 flex items-center justify-between gap-3 min-h-[58px] transition-colors ${
-        isClickable
-          ? "cursor-pointer hover:bg-white/[0.03] active:bg-white/[0.06] select-none"
-          : ""
-      } ${className}`}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => e.key === "Enter" && onClick() : undefined}
+      className={`flex min-h-[64px] items-center gap-3.5 bg-card px-4 py-2.5 ${onClick ? "row-press" : ""} ${className}`}
     >
-      <div className="flex items-center gap-3.5 min-w-0 flex-1">
-        {icon && (
-          <div
-            className={`w-11 h-11 rounded-full ${iconBg} ${iconColor} flex items-center justify-center shrink-0 shadow-sm`}
-          >
-            {icon}
-          </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="text-[15px] font-semibold text-white tracking-tight leading-snug truncate">
-            {title}
-          </div>
-          {subtitle && (
-            <div className="text-[13px] text-[#8e8e93] font-normal leading-tight mt-0.5 truncate">
-              {subtitle}
-            </div>
-          )}
-        </div>
+      {icon}
+      <div className="min-w-0 flex-1">
+        <div className={`text-[17px] font-semibold leading-[22px] ${wrap ? "break-words" : "truncate"}`}>{title}</div>
+        {subtitle && <div className="mt-0.5 truncate text-[15px] leading-5 text-hint">{subtitle}</div>}
       </div>
-
-      {(right || showChevron) && (
-        <div className="flex items-center gap-2 shrink-0 ml-2">
-          {right}
-          {showChevron && <ChevronRight size={17} className="text-[#54575c]" />}
+      {(right || rightSub) && (
+        <div className="shrink-0 text-right">
+          {right && <div className="text-[17px] font-medium leading-[22px]">{right}</div>}
+          {rightSub && <div className="mt-0.5 text-[15px] leading-5 text-hint">{rightSub}</div>}
         </div>
       )}
+      {showChevron && <ChevronRight size={20} className="-mr-1 shrink-0 text-hint/70" strokeWidth={2.5} />}
     </div>
   );
 }

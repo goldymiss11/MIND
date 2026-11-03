@@ -10,6 +10,7 @@ export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   telegramId: bigint("telegram_id", { mode: "number" }).notNull().unique(),
   source: varchar("source").default("organic"),
+  timezone: varchar("timezone", { length: 64 }).default("Europe/Moscow").notNull(),
   digestEnabled: boolean("digest_enabled").default(true).notNull(),
   lastDigestSentAt: timestamp("last_digest_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

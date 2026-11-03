@@ -2,10 +2,11 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Script from "next/script";
 import { Navigation } from "../components/Navigation";
+import { TelegramShell } from "../components/TelegramShell";
 
 export const metadata: Metadata = {
   title: "MIND",
-  description: "Personal AI Operating System",
+  description: "Персональный AI-ассистент в Telegram",
 };
 
 export const viewport: Viewport = {
@@ -13,8 +14,11 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#000000",
+  viewportFit: "cover",
 };
+
+// Runs before first paint so light-theme users never see a dark flash.
+const applyThemeScript = `try{var s=window.Telegram&&Telegram.WebApp&&Telegram.WebApp.colorScheme;if(s)document.documentElement.dataset.theme=s}catch(e){}`;
 
 export default function RootLayout({
   children,
@@ -22,11 +26,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="ru" suppressHydrationWarning>
       <head>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
+        <Script id="apply-theme" strategy="beforeInteractive">
+          {applyThemeScript}
+        </Script>
       </head>
-      <body className="min-h-screen pb-28 sm:pb-32 font-sans bg-[#000000] text-white selection:bg-[#007aff]/30 antialiased">
+      <body className="bg-page font-sans text-ink antialiased selection:bg-accent/30">
+        <TelegramShell />
         {children}
         <Navigation />
       </body>

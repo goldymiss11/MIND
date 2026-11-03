@@ -2,6 +2,22 @@
 
 import { db, schema } from "@mind/db";
 import { desc, eq, sql, gte } from "drizzle-orm";
+import { createHash, timingSafeEqual } from "node:crypto";
+
+/**
+ * Admin access requires ADMIN_SECRET to be configured: an unset secret denies everyone.
+ * Server actions are public endpoints, so every exported action has to check this itself.
+ */
+function isAdmin(secret?: string): boolean {
+  const adminSecret = process.env.ADMIN_SECRET;
+  if (!adminSecret || !secret) return false;
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(secret), digest(adminSecret));
+}
+
+function assertAdmin(secret?: string): void {
+  if (!isAdmin(secret)) throw new Error("Unauthorized");
+}
 
 export interface ModelUsageStat {
   model: string;
@@ -116,7 +132,8 @@ function formatAction(rawAction: string): { title: string; category: ActivityIte
 /**
  * Fetches high-level metrics: Users, Tasks, Generated Artifacts, Total AI Runs
  */
-export async function getMetrics(): Promise<DashboardMetrics> {
+export async function getMetrics(secret?: string): Promise<DashboardMetrics> {
+  assertAdmin(secret);
   if (!process.env.DATABASE_URL) {
     console.error("[getMetrics] DATABASE_URL is not set");
     return {
@@ -160,7 +177,8 @@ export async function getMetrics(): Promise<DashboardMetrics> {
 /**
  * Groups users by acquisition source (e.g. founder, freelance, organic)
  */
-export async function getAudienceStats(): Promise<AudienceStat[]> {
+export async function getAudienceStats(secret?: string): Promise<AudienceStat[]> {
+  assertAdmin(secret);
   try {
     const rows = await db
       .select({
@@ -187,7 +205,8 @@ export async function getAudienceStats(): Promise<AudienceStat[]> {
 /**
  * Fetches last 20 actions from agent_runs joined with users table
  */
-export async function getRecentActivity(): Promise<ActivityItem[]> {
+export async function getRecentActivity(secret?: string): Promise<ActivityItem[]> {
+  assertAdmin(secret);
   try {
     const runs = await db
       .select({
@@ -269,16 +288,16 @@ const KNOWN_MODEL_METADATA: Record<
     dailyRequestLimit: 1500,
     rpmLimit: 1500,
   },
-  "llama-3.3-70b-versatile": {
-    displayName: "Llama 3.3 70B Versatile (Groq)",
+  "openai/gpt-oss-120b": {
+    displayName: "GPT-OSS 120B (Groq)",
     provider: "groq",
     tier: "complex",
     dailyTokenLimit: 100000,
     dailyRequestLimit: 1000,
     rpmLimit: 30,
   },
-  "llama-3.1-8b-instant": {
-    displayName: "Llama 3.1 8B Instant (Groq)",
+  "openai/gpt-oss-20b": {
+    displayName: "GPT-OSS 20B (Groq)",
     provider: "groq",
     tier: "simple",
     dailyTokenLimit: 500000,
@@ -331,7 +350,8 @@ function getModelMetadata(modelName: string) {
 /**
  * Fetches comprehensive AI metrics, live quotas, and countdown to midnight UTC reset
  */
-export async function getAiMetrics(): Promise<AiDashboardData> {
+export async function getAiMetrics(secret?: string): Promise<AiDashboardData> {
+  assertAdmin(secret);
   const now = new Date();
   const nextMidnightUtc = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0)
@@ -593,8 +613,7 @@ export async function sendBroadcast(
   secret?: string,
   options?: BroadcastOptions
 ): Promise<{ success: boolean; sent: number; failed: number; total: number; error?: string }> {
-  const adminSecret = process.env.ADMIN_SECRET || "founder_super_secret_2026";
-  if (!secret || secret !== adminSecret) {
+  if (!isAdmin(secret)) {
     return { success: false, sent: 0, failed: 0, total: 0, error: "Unauthorized" };
   }
 
@@ -644,13 +663,6 @@ export async function sendBroadcast(
   const shouldMarkFeedback = options?.markAwaitingFeedback ?? true;
   if (shouldMarkFeedback) {
     try {
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS feedback_sessions (
-          telegram_id bigint PRIMARY KEY,
-          created_at timestamptz NOT NULL DEFAULT now()
-        );
-      `);
-
       for (const tid of recipients) {
         await db.execute(sql`
           INSERT INTO feedback_sessions (telegram_id) VALUES (${tid})
@@ -764,23 +776,11 @@ export async function sendBroadcast(
  * Retrieves list of user feedback collected from bot users
  */
 export async function getFeedbacks(secret?: string): Promise<FeedbackItem[]> {
-  const adminSecret = process.env.ADMIN_SECRET || "founder_super_secret_2026";
-  if (!secret || secret !== adminSecret) {
+  if (!isAdmin(secret)) {
     return [];
   }
 
   try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS feedbacks (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        telegram_id bigint NOT NULL,
-        username varchar(255),
-        text text NOT NULL,
-        source varchar(64) DEFAULT 'broadcast',
-        created_at timestamptz NOT NULL DEFAULT now()
-      );
-    `);
-
     const res = await db.execute(sql`
       SELECT id, telegram_id, username, text, source, created_at
       FROM feedbacks

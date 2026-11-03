@@ -325,7 +325,7 @@ test("AiRouter: throws Capability mismatch when googleSearch requested on model 
     router.route({
       operation: "text",
       tier: "standard",
-      explicitModel: "llama-3.3-70b-versatile",
+      explicitModel: "openai/gpt-oss-120b",
       requiredCapabilities: { googleSearch: true }
     });
   }, /requires googleSearch/i);
@@ -334,11 +334,11 @@ test("AiRouter: throws Capability mismatch when googleSearch requested on model 
 test("MODEL_REGISTRY: Groq models have valid model configurations", async () => {
   const { MODEL_REGISTRY } = await import("../src/models.js");
 
-  assert.ok(MODEL_REGISTRY["llama-3.1-8b-instant"]);
-  assert.equal(MODEL_REGISTRY["llama-3.1-8b-instant"]?.provider, "groq");
+  assert.ok(MODEL_REGISTRY["openai/gpt-oss-20b"]);
+  assert.equal(MODEL_REGISTRY["openai/gpt-oss-20b"]?.provider, "groq");
 
-  assert.ok(MODEL_REGISTRY["llama-3.3-70b-versatile"]);
-  assert.equal(MODEL_REGISTRY["llama-3.3-70b-versatile"]?.provider, "groq");
+  assert.ok(MODEL_REGISTRY["openai/gpt-oss-120b"]);
+  assert.equal(MODEL_REGISTRY["openai/gpt-oss-120b"]?.provider, "groq");
 });
 
 test("GeminiProvider: generateText formats imageBase64 inlineData part correctly", async () => {

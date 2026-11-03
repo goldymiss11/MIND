@@ -179,7 +179,7 @@ export class GroqProvider implements AIProvider {
     // For Phase 2, fallback to a known Groq model if the resolved one belongs to gemini.
     let model = resolveModel(tier, options?.model);
     if (!model || model.includes("gemini")) {
-      model = "llama-3.1-8b-instant";
+      model = "openai/gpt-oss-20b";
     }
 
     const messages = this.formatMessages(prompt, options);
@@ -223,7 +223,7 @@ export class GroqProvider implements AIProvider {
     const tier: AiTaskTier = options?.tier ?? "standard";
     let model = resolveModel(tier, options?.model);
     if (!model || model.includes("gemini")) {
-      model = "llama-3.1-8b-instant";
+      model = "openai/gpt-oss-20b";
     }
 
     // Tell the model to output JSON adhering to the schema

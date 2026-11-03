@@ -1,12 +1,27 @@
 import { Bot, type BotConfig, type Context, InlineKeyboard, InputFile, type Api } from "grammy";
 import { db, tasks, users, memories, type MindDb } from "@mind/db";
 import { eq, and, inArray, desc, asc, count, sql } from "drizzle-orm";
+import { isValidTimezone } from "@mind/shared";
+import { markdownToTelegramHtml } from "./format.js";
+import { JobQueue, RateLimiter, type RateLimits } from "./jobs.js";
 
 export const BOT_COMMANDS = [
   { command: "start", description: "Запустить/Перезапустить" },
   { command: "tasks", description: "Мои активные задачи" },
   { command: "memory", description: "Последние воспоминания" },
+  { command: "timezone", description: "Часовой пояс для напоминаний" },
+  { command: "limits", description: "Сколько запросов осталось сегодня" },
 ];
+
+// Telegram does not let bots download files larger than this.
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_VOICE_SECONDS = 10 * 60;
+const MAX_ALBUM_PHOTOS = 5;
+const ALBUM_COLLECT_MS = 1200;
+const TYPING_REFRESH_MS = 4000;
+const SLOW_HINT_MS = 20000;
+const MAX_PENDING_PER_USER = 3;
+const DEFAULT_PHOTO_PROMPT = "Что изображено на этом фото? Проанализируй и помоги мне.";
 
 export async function registerBotCommands(botOrApi: Bot | Api): Promise<void> {
   const api = "api" in botOrApi ? botOrApi.api : botOrApi;
@@ -21,13 +36,24 @@ function escapeMarkdown(text: string): string {
  * Interface representing the application service responsible for handling user messages.
  * Decouples transport layer (grammY) from domain/application business logic.
  */
+export interface AiReply {
+  text: string;
+  artifacts?: { name: string; content: string | Buffer }[];
+  citations?: any[];
+}
+
 export interface MessageHandler {
   handleIncomingMessage(
     userId: string,
     text: string,
     chatId?: string,
-    options?: { imageBase64?: string; mimeType?: string }
-  ): Promise<{ text: string; artifacts?: { name: string; content: string | Buffer }[]; citations?: any[] }>;
+    options?: { imageBase64?: string; mimeType?: string; images?: Array<{ data: string; mimeType: string }> }
+  ): Promise<AiReply>;
+  handleIncomingFile?(
+    userId: string,
+    file: { name: string; data: Buffer; caption?: string },
+    chatId?: string
+  ): Promise<AiReply>;
   ensureUser?(
     telegramUserId: string | number,
     source?: string
@@ -39,6 +65,10 @@ export interface SetupBotOptions {
   config?: BotConfig<Context>;
   database?: MindDb;
   autoRegisterCommands?: boolean;
+  /** Run AI work outside the update handler. Needed in production; tests await it inline. */
+  background?: boolean;
+  concurrency?: number;
+  rateLimits?: RateLimits;
 }
 
 /**
@@ -94,7 +124,7 @@ export function splitTelegramMessage(text: string, maxLength = 4000): string[] {
 
 /**
  * Initializes and configures the grammY Telegram Bot instance.
- * Strictly adheres to clean architecture: no direct database calls or business logic.
+ * AI work goes through the orchestrator; commands and buttons read the database directly.
  */
 export function setupBot(
   token: string,
@@ -114,7 +144,8 @@ export function setupBot(
     ("webAppUrl" in configOrOptions ||
       "config" in configOrOptions ||
       "database" in configOrOptions ||
-      "autoRegisterCommands" in configOrOptions)
+      "autoRegisterCommands" in configOrOptions ||
+      "background" in configOrOptions)
       ? (configOrOptions as SetupBotOptions)
       : { config: configOrOptions as BotConfig<Context> | undefined };
 
@@ -127,6 +158,109 @@ export function setupBot(
   const database = options.database ?? db;
 
   const bot = new Bot(token, config);
+
+  const jobs = new JobQueue(options.concurrency ?? (Number(process.env["BOT_CONCURRENCY"]) || 4));
+  const limiter = new RateLimiter(
+    options.rateLimits ?? {
+      perMinute: Number(process.env["BOT_RATE_PER_MINUTE"]) || 10,
+      perDay: Number(process.env["BOT_RATE_PER_DAY"]) || 150,
+    }
+  );
+
+  const sendAiReply = async (ctx: Context, reply: AiReply) => {
+    const chunks = splitTelegramMessage(reply.text?.trim() || "Готово", 4000);
+    for (const chunk of chunks) {
+      try {
+        await ctx.reply(markdownToTelegramHtml(chunk), { parse_mode: "HTML" });
+      } catch {
+        await ctx.reply(chunk);
+      }
+    }
+    for (const art of reply.artifacts ?? []) {
+      const buf = Buffer.isBuffer(art.content) ? art.content : Buffer.from(art.content);
+      await ctx.replyWithDocument(new InputFile(buf, art.name));
+    }
+  };
+
+  /** Shows "typing" for the whole job and warns the user when it takes long. */
+  const withProgress = async (ctx: Context, work: () => Promise<void>) => {
+    const typing = () => ctx.replyWithChatAction("typing").catch(() => {});
+    await typing();
+    const typingTimer = setInterval(typing, TYPING_REFRESH_MS);
+    let hintMessageId: number | undefined;
+    const hintTimer = setTimeout(() => {
+      ctx.reply("Работаю над этим, может занять ещё минуту…")
+        .then((message) => { hintMessageId = message.message_id; })
+        .catch(() => {});
+    }, SLOW_HINT_MS);
+
+    try {
+      await work();
+    } finally {
+      clearInterval(typingTimer);
+      clearTimeout(hintTimer);
+      if (hintMessageId !== undefined && ctx.chat) {
+        await ctx.api.deleteMessage(ctx.chat.id, hintMessageId).catch(() => {});
+      }
+    }
+  };
+
+  /**
+   * Entry point for everything that spends AI quota: applies the limits,
+   * then runs the job in the background or inline. `failureText` is what the user sees on error.
+   */
+  const runAiJob = async (ctx: Context, failureText: string, work: () => Promise<void>) => {
+    const key = String(ctx.from?.id);
+
+    if (key !== process.env["ADMIN_TELEGRAM_ID"]) {
+      if (jobs.pending(key) >= MAX_PENDING_PER_USER) {
+        await ctx.reply("Ещё работаю над предыдущими сообщениями. Дождись ответа и пришли снова.");
+        return;
+      }
+      const exceeded = limiter.check(key);
+      if (exceeded) {
+        await ctx.reply(
+          exceeded === "minute"
+            ? "Слишком много сообщений подряд. Подожди минуту и пришли снова."
+            : "На сегодня лимит запросов исчерпан. MIND бесплатный, поэтому запросы ограничены. Возвращайся завтра!"
+        );
+        return;
+      }
+    }
+
+    const job = () =>
+      withProgress(ctx, work).catch(async (error) => {
+        console.error(`Error processing Telegram update (${failureText}):`, error);
+        await ctx.reply(failureText).catch(() => {});
+      });
+
+    if (options.background) {
+      jobs.add(key, job);
+    } else {
+      await job();
+    }
+  };
+
+  const downloadFile = async (ctx: Context, fileId: string): Promise<{ data: Buffer; path: string }> => {
+    const file = await ctx.api.getFile(fileId);
+    if (!file.file_path) {
+      throw new Error("Telegram did not provide a file_path");
+    }
+    const response = await fetch(`https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`);
+    if (!response.ok) {
+      throw new Error(`Failed to download file from Telegram: ${response.statusText}`);
+    }
+    return { data: Buffer.from(await response.arrayBuffer()), path: file.file_path };
+  };
+
+  const imageMimeType = (filePath: string) => (filePath.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+
+  const albums = new Map<string, { ctx: Context; fileIds: string[]; caption?: string }>();
+
+  const findUser = async (telegramId: number) => {
+    const records = await database.select().from(users).where(eq(users.telegramId, telegramId)).limit(1);
+    return records[0];
+  };
 
   if (options.autoRegisterCommands) {
     registerBotCommands(bot).catch((err) => {
@@ -151,12 +285,7 @@ export function setupBot(
 
     if (!user && fromId) {
       try {
-        const userRecords = await database
-          .select()
-          .from(users)
-          .where(eq(users.telegramId, fromId))
-          .limit(1);
-        user = userRecords[0];
+        user = await findUser(fromId);
       } catch {
         // Fallback if db select is unavailable
       }
@@ -209,13 +338,7 @@ export function setupBot(
     if (!fromId) return;
 
     try {
-      const userRecords = await database
-        .select()
-        .from(users)
-        .where(eq(users.telegramId, fromId))
-        .limit(1);
-
-      const user = userRecords[0];
+      const user = await findUser(fromId);
       if (!user) {
         await ctx.reply("У вас нет активных задач.");
         return;
@@ -242,7 +365,7 @@ export function setupBot(
       userTasks.forEach((task, index) => {
         const statusEmoji = task.status === "in_progress" ? "⏳" : "📥";
         const deadlineStr = task.deadline
-          ? ` _(до ${new Date(task.deadline).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})_`
+          ? ` _(до ${new Date(task.deadline).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: user.timezone })})_`
           : "";
         message += `${index + 1}. ${statusEmoji} *${escapeMarkdown(task.title)}*${deadlineStr}\n`;
       });
@@ -264,13 +387,7 @@ export function setupBot(
     if (!fromId) return;
 
     try {
-      const userRecords = await database
-        .select()
-        .from(users)
-        .where(eq(users.telegramId, fromId))
-        .limit(1);
-
-      const user = userRecords[0];
+      const user = await findUser(fromId);
       if (!user) {
         await ctx.reply("У вас пока нет сохранённых воспоминаний.");
         return;
@@ -316,17 +433,41 @@ export function setupBot(
       return;
     }
 
-    try {
-      await ctx.replyWithChatAction("typing");
-      const { text: responseText } = await orchestrator.handleIncomingMessage(
+    await runAiJob(ctx, "Не удалось создать напоминание. Попробуйте позже.", async () => {
+      const reply = await orchestrator.handleIncomingMessage(
         String(fromId),
         `Напомни мне: ${match}`,
         ctx.chat?.id !== undefined ? String(ctx.chat.id) : undefined
       );
-      await ctx.reply(responseText?.trim() || "Напоминание создано.");
+      await sendAiReply(ctx, { text: reply.text?.trim() || "Напоминание создано." });
+    });
+  });
+
+  // Command: /limits
+  bot.command("limits", async (ctx) => {
+    if (!ctx.from) return;
+    await ctx.reply(`Сегодня осталось запросов: ${limiter.remainingToday(String(ctx.from.id))}. MIND бесплатный, поэтому запросы ограничены.`);
+  });
+
+  // Command: /timezone
+  bot.command("timezone", async (ctx) => {
+    const fromId = ctx.from?.id;
+    if (!fromId) return;
+
+    const timezone = typeof ctx.match === "string" ? ctx.match.trim() : "";
+    if (!timezone || !isValidTimezone(timezone)) {
+      await ctx.reply(
+        "Укажи часовой пояс, например:\n/timezone Europe/Moscow\n/timezone Asia/Yekaterinburg\n\nИли просто напиши мне, в каком ты городе."
+      );
+      return;
+    }
+
+    try {
+      await database.update(users).set({ timezone, updatedAt: new Date() }).where(eq(users.telegramId, fromId));
+      await ctx.reply(`Часовой пояс сохранён: ${timezone}`);
     } catch (error) {
-      console.error("Error creating reminder via /remind:", error);
-      await ctx.reply("Не удалось создать напоминание. Попробуйте позже.");
+      console.error("Error saving timezone:", error);
+      await ctx.reply("Не удалось сохранить часовой пояс. Попробуйте позже.");
     }
   });
 
@@ -336,13 +477,7 @@ export function setupBot(
     if (!fromId) return;
 
     try {
-      let userRecords = await database
-        .select()
-        .from(users)
-        .where(eq(users.telegramId, fromId))
-        .limit(1);
-
-      let user = userRecords[0];
+      let user = await findUser(fromId);
       if (!user && typeof orchestrator.ensureUser === "function") {
         try {
           user = await orchestrator.ensureUser(fromId, "digest_command");
@@ -352,12 +487,7 @@ export function setupBot(
       }
 
       if (!user) {
-        userRecords = await database
-          .select()
-          .from(users)
-          .where(eq(users.telegramId, fromId))
-          .limit(1);
-        user = userRecords[0];
+        user = await findUser(fromId);
       }
 
       if (!user) {
@@ -442,13 +572,6 @@ export function setupBot(
         await ctx.answerCallbackQuery().catch(() => {});
         if (database && typeof (database as any).execute === "function") {
           await (database as any).execute(sql`
-            CREATE TABLE IF NOT EXISTS feedback_sessions (
-              telegram_id bigint PRIMARY KEY,
-              created_at timestamptz NOT NULL DEFAULT now()
-            );
-          `).catch(() => {});
-
-          await (database as any).execute(sql`
             INSERT INTO feedback_sessions (telegram_id) VALUES (${fromId})
             ON CONFLICT (telegram_id) DO NOTHING;
           `).catch(() => {});
@@ -464,20 +587,14 @@ export function setupBot(
       return;
     }
 
-    if (!["done", "snz1", "snzd"].includes(action) || !taskId) {
+    if (!["done", "snz1", "snzd", "ack", "stop"].includes(action) || !taskId) {
       await ctx.answerCallbackQuery().catch(() => {});
       return;
     }
 
     try {
       // 1. Verify user exists in DB
-      const userRecords = await database
-        .select()
-        .from(users)
-        .where(eq(users.telegramId, fromId))
-        .limit(1);
-
-      const user = userRecords[0];
+      const user = await findUser(fromId);
       if (!user) {
         await ctx.answerCallbackQuery({ text: "Пользователь не найден" });
         return;
@@ -535,6 +652,16 @@ export function setupBot(
           .where(and(eq(tasks.id, taskId), eq(tasks.userId, user.id)));
 
         feedbackText = "🔔 *Отложено на завтра*";
+      } else if (action === "ack") {
+        // The next occurrence is already scheduled, so there is nothing to change.
+        feedbackText = "✅ *Отмечено*";
+      } else if (action === "stop") {
+        await database
+          .update(tasks)
+          .set({ status: "completed", completedAt: now, recurrence: null, updatedAt: now })
+          .where(and(eq(tasks.id, taskId), eq(tasks.userId, user.id)));
+
+        feedbackText = "🛑 *Повтор отключён*";
       }
 
       // 4. Update reminder message, removing buttons
@@ -570,21 +697,13 @@ export function setupBot(
       return;
     }
 
-    try {
-      await ctx.replyWithChatAction("typing");
+    if (voice.duration > MAX_VOICE_SECONDS || (voice.file_size ?? 0) > MAX_DOWNLOAD_BYTES) {
+      await ctx.reply("Голосовое слишком длинное. Я понимаю сообщения до 10 минут.");
+      return;
+    }
 
-      const file = await ctx.getFile();
-      if (!file.file_path) {
-        throw new Error("Telegram did not provide a file_path for voice message");
-      }
-
-      const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
-      const audioResponse = await fetch(fileUrl);
-      if (!audioResponse.ok) {
-        throw new Error(`Failed to download voice file from Telegram: ${audioResponse.statusText}`);
-      }
-
-      const audioBlob = await audioResponse.blob();
+    await runAiJob(ctx, "Произошла ошибка при обработке голосового сообщения. Попробуйте позже.", async () => {
+      const { data: audio } = await downloadFile(ctx, voice.file_id);
 
       const groqApiKey = process.env.GROQ_API_KEY;
       if (!groqApiKey) {
@@ -592,7 +711,7 @@ export function setupBot(
       }
 
       const formData = new FormData();
-      formData.append("file", audioBlob, "audio.ogg");
+      formData.append("file", new Blob([new Uint8Array(audio)], { type: "audio/ogg" }), "audio.ogg");
       formData.append("model", "whisper-large-v3");
       formData.append("response_format", "json");
 
@@ -618,35 +737,20 @@ export function setupBot(
       }
 
       try {
-        await ctx.reply(`🎤 _Распознано:_\n\n${transcribedText}`, { parse_mode: "Markdown" });
+        await ctx.reply(`🎤 _Распознано:_\n\n${escapeMarkdown(transcribedText)}`, { parse_mode: "Markdown" });
       } catch {
         await ctx.reply(`🎤 Распознано:\n\n${transcribedText}`);
       }
 
-      await ctx.replyWithChatAction("typing");
-
-      const { text: responseText, artifacts } = await orchestrator.handleIncomingMessage(
-        String(fromId),
-        transcribedText,
-        chatId !== undefined ? String(chatId) : undefined
+      await sendAiReply(
+        ctx,
+        await orchestrator.handleIncomingMessage(
+          String(fromId),
+          transcribedText,
+          chatId !== undefined ? String(chatId) : undefined
+        )
       );
-
-      const messageContent = responseText?.trim() || "Готово";
-      const chunks = splitTelegramMessage(messageContent, 4000);
-      for (const chunk of chunks) {
-        await ctx.reply(chunk);
-      }
-
-      if (artifacts && artifacts.length > 0) {
-        for (const art of artifacts) {
-          const buf = Buffer.isBuffer(art.content) ? art.content : Buffer.from(art.content);
-          await ctx.replyWithDocument(new InputFile(buf, art.name));
-        }
-      }
-    } catch (error) {
-      console.error("Error processing Telegram voice message:", error);
-      await ctx.reply("Произошла ошибка при обработке голосового сообщения. Попробуйте позже.");
-    }
+    });
   });
 
   // Listen to incoming photo messages
@@ -654,65 +758,96 @@ export function setupBot(
     const fromId = ctx.from?.id;
     const chatId = ctx.chat?.id;
     const photos = ctx.message.photo;
+    const highestPhoto = photos?.[photos.length - 1];
 
-    if (!fromId || !photos || photos.length === 0) {
+    if (!fromId || !highestPhoto) {
       return;
     }
 
-    try {
-      await ctx.replyWithChatAction("typing");
+    const failureText = "Произошла ошибка при обработке фотографии. Попробуйте позже.";
+    const chatIdText = chatId !== undefined ? String(chatId) : undefined;
 
-      // 2. Get highest-resolution photo (last element in array)
-      const highestPhoto = photos[photos.length - 1];
-      if (!highestPhoto) {
-        throw new Error("No photo found in message");
+    // Telegram delivers an album as separate updates sharing a media_group_id.
+    const groupId = ctx.message.media_group_id;
+    if (groupId) {
+      const album = albums.get(groupId);
+      if (album) {
+        album.fileIds.push(highestPhoto.file_id);
+        album.caption = album.caption ?? ctx.message.caption;
+        return;
       }
 
-      // 3. Get file path via ctx.getFile() and download via native fetch
-      const file = await ctx.getFile();
-      if (!file.file_path) {
-        throw new Error("Telegram did not provide a file_path for photo");
-      }
+      albums.set(groupId, { ctx, fileIds: [highestPhoto.file_id], caption: ctx.message.caption });
+      setTimeout(() => {
+        const collected = albums.get(groupId);
+        albums.delete(groupId);
+        if (!collected) return;
 
-      const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
-      const imageResponse = await fetch(fileUrl);
-      if (!imageResponse.ok) {
-        throw new Error(`Failed to download photo from Telegram: ${imageResponse.statusText}`);
-      }
-
-      // 4. Convert to base64 and determine MIME type
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      const imageBase64 = Buffer.from(arrayBuffer).toString("base64");
-      const mimeType = file.file_path.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
-
-      // 5. Extract optional user caption
-      const caption = ctx.message.caption || "Что изображено на этом фото? Проанализируй и помоги мне.";
-
-      // 6. Pass the image to the orchestrator
-      const { text: responseText, artifacts } = await orchestrator.handleIncomingMessage(
-        String(fromId),
-        caption,
-        chatId !== undefined ? String(chatId) : undefined,
-        { imageBase64, mimeType }
-      );
-
-      // 8. Return response to user
-      const messageContent = responseText?.trim() || "Готово";
-      const chunks = splitTelegramMessage(messageContent, 4000);
-      for (const chunk of chunks) {
-        await ctx.reply(chunk);
-      }
-
-      if (artifacts && artifacts.length > 0) {
-        for (const art of artifacts) {
-          const buf = Buffer.isBuffer(art.content) ? art.content : Buffer.from(art.content);
-          await ctx.replyWithDocument(new InputFile(buf, art.name));
-        }
-      }
-    } catch (error) {
-      console.error("Error processing Telegram photo message:", error);
-      await ctx.reply("Произошла ошибка при обработке фотографии. Попробуйте позже.");
+        void runAiJob(collected.ctx, failureText, async () => {
+          const images = [];
+          for (const fileId of collected.fileIds.slice(0, MAX_ALBUM_PHOTOS)) {
+            const { data, path } = await downloadFile(collected.ctx, fileId);
+            images.push({ data: data.toString("base64"), mimeType: imageMimeType(path) });
+          }
+          await sendAiReply(
+            collected.ctx,
+            await orchestrator.handleIncomingMessage(
+              String(fromId),
+              collected.caption || "Что изображено на этих фото? Проанализируй и помоги мне.",
+              chatIdText,
+              { images }
+            )
+          );
+        });
+      }, ALBUM_COLLECT_MS);
+      return;
     }
+
+    await runAiJob(ctx, failureText, async () => {
+      const { data, path } = await downloadFile(ctx, highestPhoto.file_id);
+      await sendAiReply(
+        ctx,
+        await orchestrator.handleIncomingMessage(
+          String(fromId),
+          ctx.message.caption || DEFAULT_PHOTO_PROMPT,
+          chatIdText,
+          { imageBase64: data.toString("base64"), mimeType: imageMimeType(path) }
+        )
+      );
+    });
+  });
+
+  // Listen to files the user sends for reading or editing
+  bot.on("message:document", async (ctx) => {
+    const fromId = ctx.from?.id;
+    const chatId = ctx.chat?.id;
+    const document = ctx.message.document;
+
+    if (!fromId || !document) {
+      return;
+    }
+
+    if (!orchestrator.handleIncomingFile) {
+      await ctx.reply("Пока не умею работать с файлами.");
+      return;
+    }
+
+    if ((document.file_size ?? 0) > MAX_DOWNLOAD_BYTES) {
+      await ctx.reply("Файл слишком большой: Telegram отдаёт ботам файлы только до 20 МБ.");
+      return;
+    }
+
+    await runAiJob(ctx, "Произошла ошибка при обработке файла. Попробуйте позже.", async () => {
+      const { data } = await downloadFile(ctx, document.file_id);
+      await sendAiReply(
+        ctx,
+        await orchestrator.handleIncomingFile!(
+          String(fromId),
+          { name: document.file_name || "file", data, caption: ctx.message.caption },
+          chatId !== undefined ? String(chatId) : undefined
+        )
+      );
+    });
   });
 
   // Listen to incoming text messages
@@ -741,17 +876,6 @@ export function setupBot(
           // Save feedback into database
           const username = ctx.from?.username || null;
           await (database as any).execute(sql`
-            CREATE TABLE IF NOT EXISTS feedbacks (
-              id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-              telegram_id bigint NOT NULL,
-              username varchar(255),
-              text text NOT NULL,
-              source varchar(64) DEFAULT 'broadcast',
-              created_at timestamptz NOT NULL DEFAULT now()
-            );
-          `).catch(() => {});
-
-          await (database as any).execute(sql`
             INSERT INTO feedbacks (telegram_id, username, text, source)
             VALUES (${fromId}, ${username}, ${text}, 'broadcast');
           `).catch(() => {});
@@ -778,35 +902,20 @@ export function setupBot(
           return;
         }
       } catch (checkErr) {
-        // Table may not exist yet if no broadcast has been sent, continue normally
+        console.warn("[bot] Feedback session check failed:", checkErr);
       }
     }
 
-    try {
-      await ctx.replyWithChatAction("typing");
-
-      const { text: responseText, artifacts } = await orchestrator.handleIncomingMessage(
-        String(fromId),
-        text,
-        chatId !== undefined ? String(chatId) : undefined
+    await runAiJob(ctx, "Произошла ошибка при обработке сообщения. Попробуйте позже.", async () => {
+      await sendAiReply(
+        ctx,
+        await orchestrator.handleIncomingMessage(
+          String(fromId),
+          text,
+          chatId !== undefined ? String(chatId) : undefined
+        )
       );
-
-      const messageContent = responseText?.trim() || "Готово";
-      const chunks = splitTelegramMessage(messageContent, 4000);
-      for (const chunk of chunks) {
-        await ctx.reply(chunk);
-      }
-
-      if (artifacts && artifacts.length > 0) {
-        for (const art of artifacts) {
-          const buf = Buffer.isBuffer(art.content) ? art.content : Buffer.from(art.content);
-          await ctx.replyWithDocument(new InputFile(buf, art.name));
-        }
-      }
-    } catch (error) {
-      console.error("Error processing Telegram message:", error);
-      await ctx.reply("Произошла ошибка при обработке сообщения. Попробуйте позже.");
-    }
+    });
   });
 
   return bot;

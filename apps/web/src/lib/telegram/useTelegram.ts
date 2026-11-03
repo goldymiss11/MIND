@@ -8,7 +8,12 @@ export interface TelegramUser {
   username?: string;
   language_code?: string;
   is_premium?: boolean;
+  photo_url?: string;
 }
+
+// Outside Telegram there is no user. Development still gets one, to preview the screens in a browser.
+export const IS_DEV = process.env.NODE_ENV === 'development';
+const PREVIEW_USER: TelegramUser | null = IS_DEV ? { id: 1, first_name: 'Гость' } : null;
 
 export function useTelegram() {
   const [isReady, setIsReady] = useState(false);
@@ -22,37 +27,15 @@ export function useTelegram() {
     }
 
     const tg = window.Telegram?.WebApp;
-    if (tg) {
-      tg.ready();
-      tg.expand();
-      setIsReady(true);
-      if (tg.initDataUnsafe?.user) {
-        setUser(tg.initDataUnsafe.user as TelegramUser);
-      } else {
-        setUser({
-          id: 100000001,
-          first_name: "Александр",
-          last_name: "MIND",
-          username: "alexandr_mind",
-          is_premium: true,
-        });
-      }
-      if (tg.initData) {
-        setInitData(tg.initData);
-      }
-    } else if (rawInit) {
-      setIsReady(true);
+    if (tg?.initDataUnsafe?.user) {
+      setUser(tg.initDataUnsafe.user as TelegramUser);
     } else {
-      // Development or headless preview fallback
-      setIsReady(true);
-      setUser({
-        id: 100000001,
-        first_name: "Александр",
-        last_name: "MIND",
-        username: "alexandr_mind",
-        is_premium: true,
-      });
+      setUser(PREVIEW_USER);
     }
+    if (tg?.initData) {
+      setInitData(tg.initData);
+    }
+    setIsReady(true);
   }, []);
 
   const close = () => {

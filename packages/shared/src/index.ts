@@ -24,3 +24,5 @@ export type EntityId = string;
 export function getCurrentIsoTimestamp(): string {
   return new Date().toISOString();
 }
+
+export * from "./time.js";

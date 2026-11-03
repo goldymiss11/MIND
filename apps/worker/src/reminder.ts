@@ -1,5 +1,6 @@
 import { eq, and, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, tasks, users, type MindDb } from "@mind/db";
+import { DEFAULT_TIMEZONE, nextOccurrence, type Recurrence } from "@mind/shared";
 import { InlineKeyboard } from "grammy";
 
 export interface ReminderJobResult {
@@ -19,10 +20,8 @@ export interface TelegramSender {
 export const SCAN_REMINDERS_JOB_NAME = "scan-reminders";
 
 /**
- * Scans for tasks with an approaching deadline (< 4 hours from now)
- * that have not yet been reminded (lastRemindedAt IS NULL),
- * sends a proactive reminder to the user via Telegram,
- * and records lastRemindedAt = NOW().
+ * Sends a reminder for every task whose deadline has arrived and that has not been reminded yet.
+ * A repeating task moves on to its next occurrence instead of staying reminded.
  */
 export async function scanReminders(
   database: MindDb = db,
@@ -34,18 +33,15 @@ export async function scanReminders(
     errors: 0,
   };
 
-  // Find tasks where:
-  // - status IN ('inbox', 'in_progress')
-  // - deadline IS NOT NULL
-  // - deadline < NOW() + INTERVAL '4 hours'
-  // - lastRemindedAt IS NULL
   const upcomingTasks = await database
     .select({
       id: tasks.id,
       title: tasks.title,
       deadline: tasks.deadline,
       userId: tasks.userId,
+      recurrence: tasks.recurrence,
       telegramId: users.telegramId,
+      timezone: users.timezone,
     })
     .from(tasks)
     .innerJoin(users, eq(tasks.userId, users.id))
@@ -53,7 +49,7 @@ export async function scanReminders(
       and(
         inArray(tasks.status, ["inbox", "in_progress"]),
         isNotNull(tasks.deadline),
-        sql`${tasks.deadline} < NOW() + INTERVAL '4 hours'`,
+        sql`${tasks.deadline} <= NOW()`,
         isNull(tasks.lastRemindedAt)
       )
     );
@@ -69,23 +65,38 @@ export async function scanReminders(
         continue;
       }
 
-      const keyboard = new InlineKeyboard()
-        .text("✅ Выполнено", `done:${task.id}`)
-        .text("🔔 +1 час", `snz1:${task.id}`)
-        .text("🔔 Завтра", `snzd:${task.id}`);
+      const keyboard = task.recurrence
+        ? new InlineKeyboard()
+            .text("✅ Сделано", `ack:${task.id}`)
+            .text("🛑 Больше не напоминать", `stop:${task.id}`)
+        : new InlineKeyboard()
+            .text("✅ Выполнено", `done:${task.id}`)
+            .text("🔔 +1 час", `snz1:${task.id}`)
+            .text("🔔 Завтра", `snzd:${task.id}`);
 
       await telegramApi.sendMessage(
         task.telegramId,
-        `🔔 Напоминание: Приближается дедлайн по задаче «${task.title}»`,
+        `🔔 Напоминание: «${task.title}»`,
         { reply_markup: keyboard }
       );
 
       await database
         .update(tasks)
-        .set({
-          lastRemindedAt: sql`NOW()`,
-          updatedAt: sql`NOW()`,
-        })
+        .set(
+          task.recurrence && task.deadline
+            ? {
+                deadline: nextOccurrence(
+                  new Date(task.deadline),
+                  task.recurrence as Recurrence,
+                  task.timezone ?? DEFAULT_TIMEZONE
+                ),
+                updatedAt: sql`NOW()`,
+              }
+            : {
+                lastRemindedAt: sql`NOW()`,
+                updatedAt: sql`NOW()`,
+              }
+        )
         .where(eq(tasks.id, task.id));
 
       result.reminded++;

@@ -17,7 +17,7 @@ function escapeMarkdown(text: string): string {
   return text.replace(/([_*`\[\]])/g, "\\$1");
 }
 
-function formatDigestTask(task: Task, index: number, now: Date): string {
+function formatDigestTask(task: Task, index: number, now: Date, timeZone?: string): string {
   const num = index + 1;
   const escapedTitle = escapeMarkdown(task.title);
 
@@ -26,7 +26,7 @@ function formatDigestTask(task: Task, index: number, now: Date): string {
 
   if (task.deadline) {
     const dl = new Date(task.deadline);
-    const timeStr = dl.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    const timeStr = dl.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone });
     const isToday =
       dl.getDate() === now.getDate() &&
       dl.getMonth() === now.getMonth() &&
@@ -37,13 +37,13 @@ function formatDigestTask(task: Task, index: number, now: Date): string {
       if (isToday) {
         deadlineText = ` _(просрочено, было до ${timeStr})_`;
       } else {
-        const dateStr = dl.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+        const dateStr = dl.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", timeZone });
         deadlineText = ` _(просрочено с ${dateStr})_`;
       }
     } else if (isToday) {
       deadlineText = ` _(до ${timeStr})_`;
     } else {
-      const dateStr = dl.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+      const dateStr = dl.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", timeZone });
       deadlineText = ` _(до ${dateStr} ${timeStr})_`;
     }
   } else {
@@ -241,7 +241,7 @@ export async function generateDailyDigest(
       } else if (dueToday.length === 1) {
         scenario = "B";
         const t = dueToday[0]!;
-        const dlStr = new Date(t.deadline!).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        const dlStr = new Date(t.deadline!).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: user.timezone });
         scenarioContext = `Сценарий: Главная задача на сегодня — «${t.title}» (дедлайн до ${dlStr}). Сделай акцент на ней.`;
       } else {
         scenario = "D";
@@ -281,7 +281,7 @@ ${scenarioContext}`;
         }
       }
 
-      const taskLines = topTasks.map((t, idx) => formatDigestTask(t, idx, now)).join("\n");
+      const taskLines = topTasks.map((t, idx) => formatDigestTask(t, idx, now, user.timezone)).join("\n");
       const message = `🌅 *План на день*\n\n${aiText}\n\n${taskLines}`;
 
       const keyboard = new InlineKeyboard().text("🔕 Отключить утреннюю сводку", "digest:off");

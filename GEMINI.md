@@ -23,7 +23,7 @@ The product consists of:
 4. Memory System — long-term personal context
 5. Task System — goals, tasks, deadlines and progress
 6. Proactive Engine — reminders and autonomous actions
-7. Artifact Engine — DOCX, PPTX, XLSX, PDF, code and other files
+7. Artifact Engine — DOCX, PPTX, XLSX, code and other files (lives in /packages/core/src/artifacts; PDF is read, not generated)
 8. Agent/Skill System — reusable workflows
 
 ---
@@ -85,8 +85,8 @@ Do NOT expose technical concepts such as agents, embeddings, RAG, tools or workf
 
 ## Storage
 
-- S3-compatible object storage
-- Prefer Cloudflare R2
+- Generated and uploaded files live in Postgres (`artifact_files`, up to 10 MB each)
+- Move them to S3-compatible object storage, preferably Cloudflare R2, once the free database runs short
 
 ## AI
 
@@ -114,7 +114,6 @@ Main modules:
 /packages/ai
 /packages/db
 /packages/telegram
-/packages/artifacts
 /packages/memory
 /packages/agents
 /packages/shared

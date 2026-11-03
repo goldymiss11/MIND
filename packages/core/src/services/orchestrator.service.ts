@@ -6,6 +6,9 @@ import { db as defaultDb, schema, type MindDb } from "@mind/db";
 import { AiService, AiMessage, Type } from "@mind/ai";
 import { MemoryService, type ExtractedMemoryItem } from "@mind/memory";
 import { randomUUID as uuidv4 } from "node:crypto";
+import { DEFAULT_TIMEZONE, parseDeadline } from "@mind/shared";
+import { extractFile, UnsupportedFileError } from "../artifacts/extract.js";
+import { saveArtifact } from "../tools/definitions.js";
 import { ExecutionResult, ExecutionPlan, ExecutionRequest, ExecutionArtifact } from "../types/execution.js";
 import { EXECUTION_PLAN_SCHEMA } from "../types/plan-schema.js";
 
@@ -14,51 +17,17 @@ import { toolRegistry } from "../tools/registry.js";
 // Basic Types
 export type { ExtractedMemoryItem, ExecutionRequest };
 export { EXECUTION_PLAN_SCHEMA };
-export interface ExtractedTaskItem { title: string; description?: string | null; deadline?: string | null; priority?: string; projectName?: string | null; }
+export interface ExtractedTaskItem { title: string; description?: string | null; deadline?: string | null; priority?: string; projectName?: string | null; recurrence?: string | null; }
 
-export function parseRelativeOrIsoDeadline(rawDeadline?: string | null): Date | null {
-  if (!rawDeadline || typeof rawDeadline !== "string") return null;
-  const trimmed = rawDeadline.trim();
-  if (!trimmed) return null;
+export function parseRelativeOrIsoDeadline(rawDeadline?: string | null, timezone?: string): Date | null {
+  return parseDeadline(rawDeadline, timezone);
+}
 
-  const isoParsed = new Date(trimmed);
-  if (!isNaN(isoParsed.getTime()) && !/^\d+$/.test(trimmed)) {
-    return isoParsed;
-  }
+const SMALL_TALK = /^(привет|здравствуй(те)?|добрый (день|вечер)|доброе утро|хай|hi|hello|спасибо|благодарю|спс|пасибо|ок(ей)?|ok|окей|хорошо|понял(а)?|ясно|круто|класс|супер|отлично|да|нет|ага|угу|пока|thanks)[\s!.,)]*$/i;
 
-  const now = Date.now();
-  const lower = trimmed.toLowerCase();
-
-  const minMatch = lower.match(/(?:через|in)\s+(\d+)\s*(?:минут|мин|минуту|минуты|minutes?|mins?)/i);
-  if (minMatch && minMatch[1]) {
-    return new Date(now + parseInt(minMatch[1], 10) * 60 * 1000);
-  }
-
-  const hourMatch = lower.match(/(?:через|in)\s+(\d+)\s*(?:часов|часа|час|ч|hours?|hrs?)/i);
-  if (hourMatch && hourMatch[1]) {
-    return new Date(now + parseInt(hourMatch[1], 10) * 3600 * 1000);
-  }
-
-  const dayMatch = lower.match(/(?:через|in)\s+(\d+)\s*(?:дней|дня|день|дн|days?)/i);
-  if (dayMatch && dayMatch[1]) {
-    return new Date(now + parseInt(dayMatch[1], 10) * 86400 * 1000);
-  }
-
-  if (lower.includes("завтра") || lower.includes("tomorrow")) {
-    return new Date(now + 24 * 3600 * 1000);
-  }
-
-  const timeMatch = lower.match(/(?:в|at)\s+(\d{1,2})[:.](\d{2})/i);
-  if (timeMatch && timeMatch[1] && timeMatch[2]) {
-    const d = new Date(now);
-    d.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
-    if (d.getTime() < now) {
-      d.setDate(d.getDate() + 1);
-    }
-    return d;
-  }
-
-  return null;
+/** Greetings and acknowledgements hold no tasks or facts, so they need no analyzer call. */
+export function isSmallTalk(text: string): boolean {
+  return SMALL_TALK.test(text.trim());
 }
 
 export const ANALYZER_SCHEMA = {
@@ -82,7 +51,8 @@ export const ANALYZER_SCHEMA = {
         properties: {
           title: { type: Type.STRING },
           description: { type: Type.STRING },
-          deadline: { type: Type.STRING, description: "Absolute ISO 8601 UTC timestamp or relative string like 'через 5 минут'" },
+          deadline: { type: Type.STRING, description: "ISO 8601 local time of the user without offset, or a relative string like 'через 5 минут'. For a repeating reminder, the first occurrence." },
+          recurrence: { type: Type.STRING, enum: ["none", "daily", "weekly", "monthly"], description: "Repeat schedule: 'каждый день' is daily, 'каждую неделю' or 'по понедельникам' is weekly, 'каждый месяц' is monthly." },
           priority: { type: Type.STRING, enum: ["low", "normal", "high", "urgent"] },
           projectName: { type: Type.STRING }
         },
@@ -140,10 +110,44 @@ export class OrchestratorService {
     telegramUserId: string | number,
     text: string,
     telegramChatId?: string | number,
-    options?: { imageBase64?: string; mimeType?: string }
+    options?: { imageBase64?: string; mimeType?: string; images?: Array<{ data: string; mimeType: string }> }
   ) {
     const res = await this.execute({ telegramUserId, text, telegramChatId, ...options });
     return { text: res.response, artifacts: res.artifacts, citations: res.citations };
+  }
+
+  /**
+   * Saves a file sent by the user so it can be read and edited later.
+   * With a caption, the caption is handled as a request about that file.
+   */
+  async handleIncomingFile(
+    telegramUserId: string | number,
+    file: { name: string; data: Buffer; caption?: string },
+    telegramChatId?: string | number
+  ) {
+    let extracted;
+    try {
+      extracted = await extractFile(file.name, file.data);
+    } catch (err: any) {
+      console.warn(`[OrchestratorService] Could not read file ${file.name}:`, err);
+      const reason = err instanceof UnsupportedFileError ? `${err.message}.` : "Файл повреждён или защищён паролем.";
+      return { text: `Не получилось прочитать «${file.name}». ${reason} Я понимаю docx, xlsx, pptx, pdf и текстовые файлы.` };
+    }
+
+    const user = await this.ensureUser(telegramUserId);
+    if (!user) throw new Error(`Failed to find or create user for telegramId: ${telegramUserId}`);
+
+    const artifactId = await saveArtifact(
+      this.db,
+      { userId: user.id, name: file.name, type: extracted.type, content: extracted.content },
+      file.data
+    );
+
+    const caption = file.caption?.trim();
+    if (!caption) {
+      return { text: `Получил файл «${file.name}» и сохранил его. Что с ним сделать? Могу пересказать, ответить на вопросы или внести правки.` };
+    }
+    return this.handleIncomingMessage(telegramUserId, `[Файл «${file.name}», id: ${artifactId}] ${caption}`, telegramChatId);
   }
 
   /**
@@ -283,16 +287,24 @@ export class OrchestratorService {
       throw new Error(`Failed to find or create conversation for user: ${user.id}`);
     }
 
+    const hasImages = Boolean(request.imageBase64 || request.images?.length);
+    const timezone = user.timezone ?? DEFAULT_TIMEZONE;
+
     // 2. Persist Message & capture sourceMessageId (P2-6)
     const insertedMessages = await this.db.insert(schema.messages).values({
-      conversationId: conversation.id, role: "user", content: request.text
+      conversationId: conversation.id,
+      role: "user",
+      // Images are not stored, so at least keep a trace of them in the dialogue history.
+      content: hasImages ? `[Фото] ${request.text}` : request.text
     }).returning();
     const sourceMessageId = insertedMessages?.[0]?.id;
 
     // 3. Intent & Context Extraction
     const nowIso = new Date().toISOString();
+    const localNow = new Date().toLocaleString("ru-RU", { timeZone: timezone, dateStyle: "full", timeStyle: "short" });
     const systemPrompt = `Analyze the user message to extract personal memories and actionable tasks/events/reminders.
 Current UTC Time: ${nowIso}.
+User's timezone: ${timezone}. User's local time: ${localNow}.
 
 Rules:
 1. Intent:
@@ -305,20 +317,23 @@ Rules:
 2. Tasks & Events (hasTask):
    - Whenever the user mentions ANY upcoming meeting, appointment, deadline, reminder, or thing they need to do, set hasTask=true!
    - Extract title (e.g. "Встреча с инвесторами"), description, priority (set "urgent" or "high" if deadline is imminent), and deadline.
-   - For deadline: specify either an ISO 8601 UTC timestamp calculated using Current UTC Time, or the relative phrase like "через 5 минут", "завтра в 15:00".
+   - For deadline: specify either an ISO 8601 timestamp in the user's local time without an offset (e.g. 2026-11-04T15:00:00), or the relative phrase like "через 5 минут", "завтра в 15:00". Times the user names are always in their local time.
+   - For repeating reminders set recurrence; otherwise use "none".
 
 3. Memories (hasMemory):
    - Extract enduring facts, personal details, preferences, key context about the user.
    - importance must be an integer from 1 to 10 (e.g. 5, 8, 10).`;
 
     let analyzerData: any = { intent: "chat", hasMemory: false, memories: [], hasTask: false, tasks: [] };
-    try {
-      const analyzerRes = await this.ai.generateStructured<any>(request.text, ANALYZER_SCHEMA, { tier: "simple", systemInstruction: systemPrompt });
-      await this.logAiRun(user.id, "unified_analyzer", analyzerRes);
-      analyzerData = analyzerRes.result;
-    } catch (analyzerErr: any) {
-      console.warn("[OrchestratorService] Unified analyzer degraded, falling back to chat intent:", analyzerErr);
-      warnings.push({ message: `Analyzer degraded: ${analyzerErr.message}`, category: "provider_failure" });
+    if (!isSmallTalk(request.text)) {
+      try {
+        const analyzerRes = await this.ai.generateStructured<any>(request.text, ANALYZER_SCHEMA, { tier: "simple", systemInstruction: systemPrompt });
+        await this.logAiRun(user.id, "unified_analyzer", analyzerRes);
+        analyzerData = analyzerRes.result;
+      } catch (analyzerErr: any) {
+        console.warn("[OrchestratorService] Unified analyzer degraded, falling back to chat intent:", analyzerErr);
+        warnings.push({ message: `Analyzer degraded: ${analyzerErr.message}`, category: "provider_failure" });
+      }
     }
     
     // Process Memories with Deduplication via MemoryService (P0-1 Graceful Degradation)
@@ -352,7 +367,7 @@ Rules:
         
         let deadlineDate: Date | null = null;
         if (task.deadline) {
-          deadlineDate = parseRelativeOrIsoDeadline(task.deadline);
+          deadlineDate = parseDeadline(task.deadline, timezone);
         }
 
         const initialStatus = deadlineDate ? "in_progress" : "inbox";
@@ -365,13 +380,14 @@ Rules:
           deadline: deadlineDate,
           priority: priority,
           status: initialStatus,
-          projectId: projId, 
+          projectId: projId,
+          recurrence: deadlineDate && ["daily", "weekly", "monthly"].includes(task.recurrence) ? task.recurrence : null,
         }).returning();
 
         const insertedId = insertedTask[0]!.id as string;
         createdTasks.push(insertedId);
         newlyCreatedTaskSummaries.push(
-          `«${task.title}»${deadlineDate ? ` (дедлайн: ${deadlineDate.toISOString()})` : ""}`
+          `«${task.title}»${deadlineDate ? ` (дедлайн: ${deadlineDate.toLocaleString("ru-RU", { timeZone: timezone })})` : ""}`
         );
       }
     }
@@ -402,7 +418,7 @@ Rules:
     // 5. Context Pack Assembly (P0-1 Graceful Degradation & P1-2 Context bounds)
     let relevantMemories: any[] = [];
     try {
-      relevantMemories = await this.memory.retrieveRelevantMemories(user.id, request.text, 5, {
+      if (!isSmallTalk(request.text)) relevantMemories = await this.memory.retrieveRelevantMemories(user.id, request.text, 8, {
         logAiRun: (uId, action, res) => this.logAiRun(uId, action, res),
       });
     } catch (retErr: any) {
@@ -424,7 +440,7 @@ Rules:
     let recentArtifacts: any[] = [];
     try {
       recentArtifacts = await this.db
-        .select()
+        .select({ id: schema.artifacts.id, name: schema.artifacts.name, type: schema.artifacts.type })
         .from(schema.artifacts)
         .where(
           and(
@@ -433,7 +449,7 @@ Rules:
           )
         )
         .orderBy(desc(schema.artifacts.createdAt))
-        .limit(2);
+        .limit(5);
     } catch (artErr: any) {
       console.warn("[OrchestratorService] Failed to retrieve recent artifacts:", artErr);
     }
@@ -441,6 +457,7 @@ Rules:
     // 6. Bounded Execution Loop
     let loopInstruction = `Ты MIND — персональный AI-ассистент.
 Текущее время UTC: ${nowIso}.
+Часовой пояс пользователя: ${timezone}. Его местное время: ${localNow}. Называя время пользователю, всегда указывай местное.
 
 ЯЗЫК И ПОВЕДЕНИЕ:
 - Всегда отвечай пользователю на русском языке (если пользователь сам не пишет на другом языке).
@@ -474,14 +491,11 @@ If the user requests a presentation, you MUST use the artifact generation tool w
     }
 
     if (recentArtifacts.length > 0) {
-      const lastArtifact = recentArtifacts[0];
-      loopInstruction += `\n\nПОСЛЕДНИЙ СОЗДАННЫЙ ДОКУМЕНТ ПОЛЬЗОВАТЕЛЯ:\n` +
-        `- Название: ${lastArtifact.name}\n` +
-        `- Тип: ${lastArtifact.type}\n` +
-        `- Содержимое:\n${lastArtifact.content}`;
+      loopInstruction += `\n\nФАЙЛЫ ПОЛЬЗОВАТЕЛЯ (сначала самые новые):\n` +
+        recentArtifacts.map((a) => `- id: ${a.id}, «${a.name}», тип: ${a.type}`).join("\n");
     }
 
-    loopInstruction += `\n\nЕсли пользователь просит дополнить, исправить, продолжить или переписать ранее созданный документ (например, 'добавь главу', 'исправь введение', 'допиши вывод'), ты ДОЛЖЕН взять содержимое последнего документа, применить изменения и передать полный обновлённый текст в инструмент \`invoke_skill\`.`;
+    loopInstruction += `\n\nЕсли пользователь просит дополнить, исправить, продолжить или переписать файл (например, 'добавь главу', 'исправь введение', 'поменяй цифры в таблице'), вызывай edit_artifact с id нужного файла и подробной инструкцией. Если просит рассказать о содержимом файла или ответить по нему на вопрос, вызывай read_artifact. Не пересоздавай файл через invoke_skill. Если просит забыть факт о себе, вызывай forget_memory, а если спрашивает, что ты о нём знаешь, вызывай list_memories. Если называет свой город или часовой пояс, вызывай set_timezone.`;
 
     if (executionPlan) {
       loopInstruction += "\n\nПлан выполнения:\n" + JSON.stringify(executionPlan, null, 2);
@@ -525,6 +539,7 @@ If the user requests a presentation, you MUST use the artifact generation tool w
           googleSearch: isResearch,
           imageBase64: iterations === 1 ? request.imageBase64 : undefined,
           mimeType: iterations === 1 ? request.mimeType : undefined,
+          images: iterations === 1 ? request.images : undefined,
         });
       } catch (e: any) {
         if (isResearch) {
@@ -538,6 +553,7 @@ If the user requests a presentation, you MUST use the artifact generation tool w
               googleSearch: false,
               imageBase64: iterations === 1 ? request.imageBase64 : undefined,
               mimeType: iterations === 1 ? request.mimeType : undefined,
+              images: iterations === 1 ? request.images : undefined,
             });
           } catch (fallbackErr: any) {
             return {
@@ -620,6 +636,7 @@ If the user requests a presentation, you MUST use the artifact generation tool w
               db: this.db,
               user,
               ai: this.ai,
+              conversationId: conversation!.id,
               generatedArtifacts: artifacts,
               logAiRun: (action: string, res: any) => this.logAiRun(user!.id, action, res)
             };

@@ -40,6 +40,7 @@ export const tasks = pgTable(
       .notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    recurrence: varchar("recurrence", { length: 16 }),
   },
   (table) => [
     index("tasks_user_id_idx").on(table.userId),
